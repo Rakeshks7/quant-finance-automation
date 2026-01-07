@@ -1,0 +1,192 @@
+{
+  "name": "01_Market_Data_Ingestion_ETL",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 16 * * 1-5"
+            }
+          ]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "Schedule Trigger (4 PM EST)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [
+        250,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://query1.finance.yahoo.com/v8/finance/chart/AAPL?interval=1d&range=1d",
+        "method": "GET",
+        "options": {}
+      },
+      "id": "http-fetch-data",
+      "name": "HTTP Request (Fetch Data)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        470,
+        300
+      ],
+      "notes": "Fetching AAPL data. Replace URL or use variables for dynamic tickers."
+    },
+    {
+      "parameters": {
+        "jsCode": "// TRANSFORM DATA\n// Inputs: Raw JSON from Yahoo Finance\n// Outputs: Clean flattened JSON for SQL\n\nconst result = items[0].json.chart.result[0];\nconst quote = result.indicators.quote[0];\nconst timestamp = result.timestamp[0];\n\n// Create the clean object\nconst cleanData = {\n  ticker: result.meta.symbol,\n  date: new Date(timestamp * 1000).toISOString(),\n  open_price: quote.open[0],\n  high_price: quote.high[0],\n  low_price: quote.low[0],\n  close_price: quote.close[0],\n  volume: quote.volume[0],\n  provider: 'Yahoo Finance'\n};\n\nreturn [{json: cleanData}];"
+      },
+      "id": "code-transform",
+      "name": "Code (Clean & Format)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        690,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "schema": {
+          "__rl": true,
+          "value": "public",
+          "mode": "list",
+          "cachedResultName": "public"
+        },
+        "table": {
+          "__rl": true,
+          "value": "market_data",
+          "mode": "list",
+          "cachedResultName": "market_data"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "ticker",
+              "displayName": "ticker",
+              "required": false,
+              "defaultMatch": true,
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "date",
+              "displayName": "date",
+              "required": false,
+              "defaultMatch": true,
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "open_price",
+              "displayName": "open_price",
+              "required": false,
+              "defaultMatch": true,
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "high_price",
+              "displayName": "high_price",
+              "required": false,
+              "defaultMatch": true,
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "low_price",
+              "displayName": "low_price",
+              "required": false,
+              "defaultMatch": true,
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "close_price",
+              "displayName": "close_price",
+              "required": false,
+              "defaultMatch": true,
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "volume",
+              "displayName": "volume",
+              "required": false,
+              "defaultMatch": true,
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "provider",
+              "displayName": "provider",
+              "required": false,
+              "defaultMatch": true,
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "postgres-insert",
+      "name": "Postgres (Insert DB)",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.2,
+      "position": [
+        910,
+        300
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_CREDENTIAL_ID_HERE",
+          "name": "Postgres account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Schedule Trigger (4 PM EST)": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request (Fetch Data)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request (Fetch Data)": {
+      "main": [
+        [
+          {
+            "node": "Code (Clean & Format)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code (Clean & Format)": {
+      "main": [
+        [
+          {
+            "node": "Postgres (Insert DB)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}
