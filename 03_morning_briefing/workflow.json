@@ -1,0 +1,180 @@
+{
+  "name": "03_Morning_Briefing_AI",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 8 * * 1-5"
+            }
+          ]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "Market Open Trigger (8 AM)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [
+        200,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// MOCK NEWS DATA\n// Replace with HTTP Request to NewsAPI.org\nreturn [\n  { json: { \"title\": \"Fed signals potential rate hike next month\", \"source\": \"Bloomberg\" } },\n  { json: { \"title\": \"Oil prices surge amid geopolitical tensions in Middle East\", \"source\": \"Reuters\" } },\n  { json: { \"title\": \"Tech sector rally pauses as earnings await\", \"source\": \"CNBC\" } }\n];"
+      },
+      "id": "fetch-news",
+      "name": "Fetch Overnight News",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        450,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// MOCK MARKET DATA\n// Replace with HTTP Request to AlphaVantage or Yahoo\nreturn [\n  { json: { \"index\": \"S&P 500 Futures\", \"change\": \"-0.45%\", \"price\": 4150 } },\n  { json: { \"index\": \"Nikkei 225\", \"change\": \"+1.20%\", \"price\": 32000 } },\n  { json: { \"index\": \"Gold\", \"change\": \"+0.80%\", \"price\": 1950 } }\n];"
+      },
+      "id": "fetch-indices",
+      "name": "Fetch Global Indices",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        450,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combinationMode": "mergeByPosition",
+        "options": {}
+      },
+      "id": "merge-data",
+      "name": "Consolidate Intelligence",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 2,
+      "position": [
+        680,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "gpt-4o",
+          "mode": "list",
+          "cachedResultName": "gpt-4o"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "ROLE:\nYou are a Senior Hedge Fund Analyst. Your job is to brief the Head Trader (me) before the market opens.\n\nINPUT DATA:\nGlobal Indices: {{ JSON.stringify($('Fetch Global Indices').all().map(i => i.json)) }}\nNews Headlines: {{ JSON.stringify($('Fetch Overnight News').all().map(i => i.json)) }}\n\nTASK:\n- Analyze the sentiment of the provided news.\n- Correlate news with the index movements.\n- Identify the Top 3 Risks for the trading session today.\n- Provide a \"Sentiment Score\" from -10 (Extreme Bearish) to +10 (Extreme Bullish).\n\nFORMAT:\nReport formatted for Telegram (use emojis).\nStructure:\n1. 🌍 **Market Pulse** (One line summary)\n2. 📉 **Key Overnight Moves**\n3. ⚠️ **Top 3 Risks**\n4. 🧭 **Sentiment Score**"
+            }
+          ]
+        }
+      },
+      "id": "ai-analyst",
+      "name": "OpenAI Analyst",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 1,
+      "position": [
+        900,
+        300
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "YOUR_OPENAI_CREDENTIAL_ID",
+          "name": "OpenAI account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "YOUR_TELEGRAM_CHAT_ID",
+        "text": "={{ $json.content }}",
+        "additionalFields": {}
+      },
+      "id": "telegram-sender",
+      "name": "Telegram Bot",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "position": [
+        1120,
+        300
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "YOUR_TELEGRAM_CREDENTIAL_ID",
+          "name": "Telegram account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Market Open Trigger (8 AM)": {
+      "main": [
+        [
+          {
+            "node": "Fetch Overnight News",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Fetch Global Indices",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Overnight News": {
+      "main": [
+        [
+          {
+            "node": "Consolidate Intelligence",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Global Indices": {
+      "main": [
+        [
+          {
+            "node": "Consolidate Intelligence",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Consolidate Intelligence": {
+      "main": [
+        [
+          {
+            "node": "OpenAI Analyst",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Analyst": {
+      "main": [
+        [
+          {
+            "node": "Telegram Bot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}
