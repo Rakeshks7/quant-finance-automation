@@ -1,0 +1,5 @@
+{
+  "maintenance_mode": false,
+  "allowed_downtime_window": "02:00-03:00",
+  "critical_services": ["market_data_feed", "order_execution_db"]
+}
