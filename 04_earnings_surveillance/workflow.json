@@ -1,0 +1,195 @@
+{
+  "name": "04_Earnings_Surveillance",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 9 * * 1-5"
+            }
+          ]
+        }
+      },
+      "id": "daily-trigger",
+      "name": "Daily Earnings Check",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [
+        200,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// MOCK EARNINGS CALENDAR API\n// Returns companies reporting today with estimates\nreturn [\n  {\n    json: {\n      ticker: \"NVDA\",\n      period: \"Q3 2025\",\n      est_eps: 3.10,\n      act_eps: 3.45,\n      revenue_bn: 18.5,\n      guidance_text: \"We expect demand to accelerate in Q4 due to new data center chip orders.\"\n    }\n  },\n  {\n    json: {\n      ticker: \"F\",\n      period: \"Q3 2025\",\n      est_eps: 0.45,\n      act_eps: 0.30,\n      revenue_bn: 35.2,\n      guidance_text: \"Supply chain constraints will likely impact margins for the remainder of the year.\"\n    }\n  },\n  {\n    json: {\n      ticker: \"XYZ_CORP\",\n      period: \"Q3 2025\",\n      est_eps: 1.00,\n      act_eps: 1.05,\n      revenue_bn: 2.0,\n      guidance_text: \"Business as usual.\"\n    }\n  }\n];"
+      },
+      "id": "fetch-calendar",
+      "name": "Fetch Earnings Calendar",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        420,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// WATCHLIST FILTER\n// In production, this would read from your watchlist.json file or DB\nconst watchlist = [\"NVDA\", \"TSLA\", \"AAPL\", \"F\"];\n\nconst updates = items.filter(item => watchlist.includes(item.json.ticker));\n\nreturn updates;"
+      },
+      "id": "filter-watchlist",
+      "name": "Filter Watchlist",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        640,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "gpt-4o",
+          "mode": "list",
+          "cachedResultName": "gpt-4o"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "Analyze this earnings guidance snippet for {{ $json.ticker }}: \"{{ $json.guidance_text }}\"\n\nReturn a JSON object only:\n{\n  \"sentiment\": \"Positive/Negative/Neutral\",\n  \"key_driver\": \"Short summary of why\",\n  \"outlook_score\": 1-10\n}"
+            }
+          ]
+        },
+        "jsonOutput": true
+      },
+      "id": "ai-guidance",
+      "name": "AI Guidance Analysis",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 1,
+      "position": [
+        860,
+        300
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "YOUR_OPENAI_ID",
+          "name": "OpenAI account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// CALCULATE SURPRISE\nconst earnings = $(\"Filter Watchlist\").item.json;\nconst analysis = items[0].json;\n\nconst surprise_pct = ((earnings.act_eps - earnings.est_eps) / earnings.est_eps) * 100;\n\nreturn [{\n  json: {\n    ticker: earnings.ticker,\n    surprise_pct: surprise_pct.toFixed(2),\n    sentiment: analysis.sentiment,\n    outlook: analysis.key_driver,\n    act_eps: earnings.act_eps,\n    est_eps: earnings.est_eps\n  }\n}];"
+      },
+      "id": "calc-metrics",
+      "name": "Calculate Metrics",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1080,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "channel": "earnings-alerts",
+        "text": "🚨 *Earnings Alert: {{ $json.ticker }}*",
+        "attachments": [
+          {
+            "color": "={{ $json.surprise_pct > 0 ? '#36a64f' : '#ff0000' }}",
+            "fields": [
+              {
+                "title": "EPS Surprise",
+                "value": "{{ $json.surprise_pct }}%",
+                "short": true
+              },
+              {
+                "title": "AI Sentiment",
+                "value": "{{ $json.sentiment }}",
+                "short": true
+              },
+              {
+                "title": "Analyst Take",
+                "value": "{{ $json.outlook }}",
+                "short": false
+              }
+            ]
+          }
+        ]
+      },
+      "id": "slack-alert",
+      "name": "Slack Alert",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.1,
+      "position": [
+        1300,
+        300
+      ],
+      "credentials": {
+        "slackApi": {
+          "id": "YOUR_SLACK_ID",
+          "name": "Slack account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Daily Earnings Check": {
+      "main": [
+        [
+          {
+            "node": "Fetch Earnings Calendar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Earnings Calendar": {
+      "main": [
+        [
+          {
+            "node": "Filter Watchlist",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Watchlist": {
+      "main": [
+        [
+          {
+            "node": "AI Guidance Analysis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Guidance Analysis": {
+      "main": [
+        [
+          {
+            "node": "Calculate Metrics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calculate Metrics": {
+      "main": [
+        [
+          {
+            "node": "Slack Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}
