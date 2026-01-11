@@ -1,0 +1,207 @@
+{
+  "name": "05_Infrastructure_Watchdog",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutes": 5
+            }
+          ]
+        }
+      },
+      "id": "heartbeat",
+      "name": "Heartbeat (Every 5m)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [
+        200,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://query1.finance.yahoo.com/v1/test",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true
+            }
+          }
+        }
+      },
+      "id": "ping-api",
+      "name": "Ping Market Data API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        450,
+        200
+      ],
+      "continueOnFail": true,
+      "notes": "Pings external data provider"
+    },
+    {
+      "parameters": {
+        "jsCode": "// MOCK DB HEALTH CHECK\n// Simulates a 'SELECT 1' query to Postgres\n\nconst startTime = new Date().getTime();\n\n// Simulate random latency\nconst latency = Math.floor(Math.random() * 500); \n// Simulate random crash (5% chance)\nconst isUp = Math.random() > 0.05;\n\nif (!isUp) {\n  throw new Error(\"Connection timed out\");\n}\n\nreturn [{\n  json: {\n    service: \"Postgres DB\",\n    status: \"UP\",\n    latency_ms: latency\n  }\n}];"
+      },
+      "id": "ping-db",
+      "name": "Ping Database (Internal)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        450,
+        400
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// ANALYZE HEALTH\nconst apiCheck = items[0] ? items[0] : {error: \"API Down\"};\nconst dbCheck = items[1] ? items[1] : {error: \"DB Down\"};\n\nconst failures = [];\n\n// Check API\nif (apiCheck.json.statusCode !== 404) { // Yahoo returns 404 on test, treating as success for connectivity\n   // In real world, check for 200\n} \nif (apiCheck.error) failures.push(\"Market Data API Unreachable\");\n\n// Check DB\nif (dbCheck.error) failures.push(\"Postgres Database Down\");\nif (dbCheck.json && dbCheck.json.latency_ms > 1000) failures.push(\"Database High Latency (>1s)\");\n\nreturn failures.map(f => ({ json: { alert: f } }));"
+      },
+      "id": "health-logic",
+      "name": "Analyze Health Status",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        700,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $items.length > 0 }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "if-critical",
+      "name": "Is System Down?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        900,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "from": "+15550109999",
+        "to": "+15550108888",
+        "message": "🚨 CRITICAL ALERT: {{ $json.alert }}. Trading halted immediately."
+      },
+      "id": "twilio-alert",
+      "name": "Twilio (Call/SMS)",
+      "type": "n8n-nodes-base.twilio",
+      "typeVersion": 1,
+      "position": [
+        1150,
+        200
+      ],
+      "credentials": {
+        "twilioApi": {
+          "id": "YOUR_TWILIO_ID",
+          "name": "Twilio account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "channel": "dev-ops",
+        "text": "✅ System Health Check Passed. All services operational.",
+        "otherOptions": {
+          "notification": false
+        }
+      },
+      "id": "slack-log",
+      "name": "Log Success",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.1,
+      "position": [
+        1150,
+        400
+      ],
+      "credentials": {
+        "slackApi": {
+          "id": "YOUR_SLACK_ID",
+          "name": "Slack account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Heartbeat (Every 5m)": {
+      "main": [
+        [
+          {
+            "node": "Ping Market Data API",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Ping Database (Internal)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ping Market Data API": {
+      "main": [
+        [
+          {
+            "node": "Analyze Health Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ping Database (Internal)": {
+      "main": [
+        [
+          {
+            "node": "Analyze Health Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Analyze Health Status": {
+      "main": [
+        [
+          {
+            "node": "Is System Down?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is System Down?": {
+      "main": [
+        [
+          {
+            "node": "Twilio (Call/SMS)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}
