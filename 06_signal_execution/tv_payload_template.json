@@ -1,0 +1,9 @@
+{
+  "ticker": "{{ticker}}",
+  "action": "{{strategy.order.action}}",
+  "entry_price": {{close}},
+  "stop_loss": {{plot("SL")}},
+  "take_profit": {{plot("TP")}},
+  "strategy_name": "Trend_Following_V1",
+  "secret_token": "YOUR_SECURE_PASSWORD_HERE"
+}
