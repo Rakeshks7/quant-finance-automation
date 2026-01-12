@@ -1,0 +1,169 @@
+{
+  "name": "06_Signal_Execution_Webhook",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "trade_hook",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook (TradingView)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        200,
+        300
+      ],
+      "webhookId": "trade_hook_endpoint"
+    },
+    {
+      "parameters": {
+        "jsCode": "// SECURITY & RISK CALCULATION\nconst payload = items[0].json.body;\n\n// 1. Security Check\nconst MY_SECRET = \"YOUR_SECURE_PASSWORD_HERE\";\nif (payload.secret_token !== MY_SECRET) {\n  throw new Error(\"Unauthorized: Invalid Secret Token\");\n}\n\n// 2. Account Settings\nconst ACCOUNT_EQUITY = 10000; // Total Capital\nconst RISK_PER_TRADE_PCT = 0.01; // Risk 1% per trade\nconst MAX_RISK_DOLLARS = ACCOUNT_EQUITY * RISK_PER_TRADE_PCT; // $100\n\n// 3. Position Sizing\nconst entry = parseFloat(payload.entry_price);\nconst sl = parseFloat(payload.stop_loss);\nconst risk_per_share = Math.abs(entry - sl);\n\n// Protect against division by zero\nif (risk_per_share === 0) throw new Error(\"Invalid SL: Gap is 0\");\n\nlet quantity = Math.floor(MAX_RISK_DOLLARS / risk_per_share);\n\n// 4. Output Order\nreturn [{\n  json: {\n    valid: true,\n    ticker: payload.ticker,\n    action: payload.action.toUpperCase(), // 'buy' -> 'BUY'\n    qty: quantity,\n    type: \"LIMIT\",\n    limit_price: entry,\n    stop_loss: sl,\n    est_cost: quantity * entry,\n    strategy: payload.strategy_name\n  }\n}];"
+      },
+      "id": "risk-engine",
+      "name": "Risk & Position Engine",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        450,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://paper-api.alpaca.markets/v2/orders",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "APCA-API-KEY-ID",
+              "value": "YOUR_KEY"
+            },
+            {
+              "name": "APCA-API-SECRET-KEY",
+              "value": "YOUR_SECRET"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "symbol",
+              "value": "={{ $json.ticker }}"
+            },
+            {
+              "name": "qty",
+              "value": "={{ $json.qty }}"
+            },
+            {
+              "name": "side",
+              "value": "={{ $json.action.toLowerCase() }}"
+            },
+            {
+              "name": "type",
+              "value": "limit"
+            },
+            {
+              "name": "limit_price",
+              "value": "={{ $json.limit_price }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "broker-api",
+      "name": "Alpaca API (Submit Order)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        700,
+        300
+      ],
+      "notes": "Currently set to Alpaca Paper Trading URL. Can replace with IBKR or Binance."
+    },
+    {
+      "parameters": {
+        "resource": "databasePage",
+        "operation": "create",
+        "databaseId": {
+          "__rl": true,
+          "value": "YOUR_NOTION_DB_ID",
+          "mode": "list",
+          "cachedResultName": "Trade Journal"
+        },
+        "propertiesUi": {
+          "propertyValues": [
+            {
+              "key": "Ticker",
+              "title": "{{ $json.ticker }}"
+            },
+            {
+              "key": "Action",
+              "select": "{{ $json.action }}"
+            },
+            {
+              "key": "Qty",
+              "number": "{{ $json.qty }}"
+            },
+            {
+              "key": "Price",
+              "number": "{{ $json.limit_price }}"
+            }
+          ]
+        }
+      },
+      "id": "notion-log",
+      "name": "Log to Notion",
+      "type": "n8n-nodes-base.notion",
+      "typeVersion": 2,
+      "position": [
+        950,
+        300
+      ],
+      "credentials": {
+        "notionApi": {
+          "id": "YOUR_NOTION_CREDENTIAL_ID",
+          "name": "Notion account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook (TradingView)": {
+      "main": [
+        [
+          {
+            "node": "Risk & Position Engine",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Risk & Position Engine": {
+      "main": [
+        [
+          {
+            "node": "Alpaca API (Submit Order)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Alpaca API (Submit Order)": {
+      "main": [
+        [
+          {
+            "node": "Log to Notion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}
