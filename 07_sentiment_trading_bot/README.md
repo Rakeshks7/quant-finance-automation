@@ -1,4 +1,4 @@
-# 🐂 Sentiment Trading Bot (News Momentum)
+#  Sentiment Trading Bot (News Momentum)
 
 An event-driven algorithmic trading module that filters global news feeds for high-impact financial events and uses AI to determine if they are actionable.
 
@@ -16,4 +16,5 @@ An event-driven algorithmic trading module that filters global news feeds for hi
 2.  **Discord:**
     * Create a Webhook in your Discord Server (Server Settings > Integrations > Webhooks).
     * Paste the Webhook URL into the n8n Discord Node credentials.
+
 3.  **Threshold:** Adjust the "Is Score > 0.8" node if you want more or fewer alerts.
