@@ -1,0 +1,165 @@
+{
+  "name": "07_Sentiment_Trading_Bot",
+  "nodes": [
+    {
+      "parameters": {
+        "url": "https://finance.yahoo.com/news/rssindex"
+      },
+      "id": "rss-trigger",
+      "name": "RSS Feed (Yahoo Finance)",
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1,
+      "position": [
+        200,
+        300
+      ],
+      "notes": "Polls for new articles"
+    },
+    {
+      "parameters": {
+        "jsCode": "// KEYWORD FILTER\n// Filters out noise before sending to AI\nconst keywords = [\n  \"FDA\", \"Merger\", \"Acquisition\", \"Buyout\", \n  \"Surge\", \"Plummet\", \"Earnings\", \"Guidance\"\n];\n\nconst items_with_keywords = items.filter(item => {\n  const text = (item.json.title + \" \" + item.json.contentSnippet).toLowerCase();\n  return keywords.some(k => text.includes(k.toLowerCase()));\n});\n\nreturn items_with_keywords;"
+      },
+      "id": "keyword-filter",
+      "name": "Filter Keywords",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        450,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "gpt-4o-mini",
+          "mode": "list",
+          "cachedResultName": "gpt-4o-mini"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "Analyze the sentiment of this financial news headline for a trader.\nHeadline: \"{{ $json.title }}\"\nContext: \"{{ $json.contentSnippet }}\"\n\nReturn a JSON object ONLY:\n{\n  \"score\": (float between -1.0 and 1.0, where 1.0 is bullish),\n  \"reasoning\": \"Short 1 sentence explanation\",\n  \"tickers\": [\"List\", \"Of\", \"Tickers\"]\n}"
+            }
+          ]
+        },
+        "jsonOutput": true
+      },
+      "id": "ai-sentiment",
+      "name": "AI Sentiment Scorer",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 1,
+      "position": [
+        700,
+        300
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "YOUR_OPENAI_ID",
+          "name": "OpenAI account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ $json.score }}",
+              "operation": "larger",
+              "value2": 0.8
+            }
+          ]
+        }
+      },
+      "id": "filter-high-conviction",
+      "name": "Is Score > 0.8?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        950,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "content": "🚨 **HIGH IMPACT NEWS ALERT** 🚨",
+        "embeds": [
+          {
+            "title": "{{ $json.title }}",
+            "url": "{{ $('Filter Keywords').item.json.link }}",
+            "description": "**AI Analysis:** {{ $json.reasoning }}\n**Tickers:** {{ $json.tickers.join(', ') }}",
+            "color": 5763719,
+            "fields": [
+              {
+                "name": "Sentiment Score",
+                "value": "🔥 {{ $json.score }} / 1.0",
+                "inline": true
+              }
+            ]
+          }
+        ]
+      },
+      "id": "discord-alert",
+      "name": "Discord Webhook",
+      "type": "n8n-nodes-base.discord",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        300
+      ],
+      "credentials": {
+        "discordWebhookApi": {
+          "id": "YOUR_DISCORD_ID",
+          "name": "Discord Webhook"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "RSS Feed (Yahoo Finance)": {
+      "main": [
+        [
+          {
+            "node": "Filter Keywords",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Keywords": {
+      "main": [
+        [
+          {
+            "node": "AI Sentiment Scorer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Sentiment Scorer": {
+      "main": [
+        [
+          {
+            "node": "Is Score > 0.8?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Score > 0.8?": {
+      "main": [
+        [
+          {
+            "node": "Discord Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}
