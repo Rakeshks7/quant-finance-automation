@@ -1,0 +1,200 @@
+{
+  "name": "08_Volatility_Guard_KillSwitch",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutes": 15
+            }
+          ]
+        }
+      },
+      "id": "vix-monitor",
+      "name": "Monitor VIX (15m)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [
+        200,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://query1.finance.yahoo.com/v8/finance/chart/^VIX?interval=1d&range=1d",
+        "options": {}
+      },
+      "id": "fetch-vix",
+      "name": "Get VIX Level",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        420,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// PARSE VIX DATA\nconst result = items[0].json.chart.result[0];\nconst currentVix = result.meta.regularMarketPrice;\n\n// THRESHOLD CONFIG\nconst MAX_VIX = 30.0;\n\nreturn [{\n  json: {\n    vix: currentVix,\n    threshold: MAX_VIX,\n    danger: currentVix > MAX_VIX\n  }\n}];"
+      },
+      "id": "check-threshold",
+      "name": "Check Threshold",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        640,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.danger }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "is-danger",
+      "name": "Is VIX > 30?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        860,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "command": "sudo systemctl stop algo-trading-bot.service"
+      },
+      "id": "ssh-kill",
+      "name": "SSH (Kill Service)",
+      "type": "n8n-nodes-base.ssh",
+      "typeVersion": 1,
+      "position": [
+        1100,
+        200
+      ],
+      "credentials": {
+        "sshPassword": {
+          "id": "YOUR_SSH_CREDENTIAL_ID",
+          "name": "Trading Server SSH"
+        }
+      },
+      "notes": "Connects to AWS/VPS and stops the bot"
+    },
+    {
+      "parameters": {
+        "from": "+15550109999",
+        "to": "+15550108888",
+        "message": "🛑 KILL SWITCH ACTIVATED. VIX is {{ $json.vix }}. Trading Algo has been stopped."
+      },
+      "id": "sms-alert",
+      "name": "SMS Manager",
+      "type": "n8n-nodes-base.twilio",
+      "typeVersion": 1,
+      "position": [
+        1320,
+        200
+      ],
+      "credentials": {
+        "twilioApi": {
+          "id": "YOUR_TWILIO_ID",
+          "name": "Twilio account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "channel": "risk-management",
+        "text": "✅ Market Normal. VIX at {{ $json.vix }}. Systems active.",
+        "otherOptions": {
+          "notification": false
+        }
+      },
+      "id": "slack-log",
+      "name": "Log Normal",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.1,
+      "position": [
+        1100,
+        400
+      ],
+      "credentials": {
+        "slackApi": {
+          "id": "YOUR_SLACK_ID",
+          "name": "Slack account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Monitor VIX (15m)": {
+      "main": [
+        [
+          {
+            "node": "Get VIX Level",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get VIX Level": {
+      "main": [
+        [
+          {
+            "node": "Check Threshold",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Threshold": {
+      "main": [
+        [
+          {
+            "node": "Is VIX > 30?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is VIX > 30?": {
+      "main": [
+        [
+          {
+            "node": "SSH (Kill Service)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Normal",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SSH (Kill Service)": {
+      "main": [
+        [
+          {
+            "node": "SMS Manager",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}
