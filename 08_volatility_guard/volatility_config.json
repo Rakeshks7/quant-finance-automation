@@ -1,0 +1,5 @@
+{
+  "vix_threshold": 30.0,
+  "service_name": "algo-trading-service",
+  "safe_mode_command": "systemctl stop algo-trading-service"
+}
