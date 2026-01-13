@@ -1,0 +1,118 @@
+{
+  "name": "09_CICD_Strategy_Pipeline",
+  "nodes": [
+    {
+      "parameters": {
+        "authentication": "gitHubOAuth2",
+        "events": [
+          "push"
+        ]
+      },
+      "id": "github-trigger",
+      "name": "GitHub Push",
+      "type": "n8n-nodes-base.githubTrigger",
+      "typeVersion": 1,
+      "position": [
+        200,
+        300
+      ],
+      "credentials": {
+        "githubOAuth2Api": {
+          "id": "YOUR_GITHUB_ID",
+          "name": "GitHub account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "command": "cd /opt/trading-bot && git pull && python3 mock_backtest.py"
+      },
+      "id": "ssh-backtest",
+      "name": "SSH (Run Backtest)",
+      "type": "n8n-nodes-base.ssh",
+      "typeVersion": 1,
+      "position": [
+        450,
+        300
+      ],
+      "credentials": {
+        "sshPassword": {
+          "id": "YOUR_SSH_ID",
+          "name": "Backtest Server SSH"
+        }
+      },
+      "notes": "Updates code and runs test"
+    },
+    {
+      "parameters": {
+        "jsCode": "// PARSE SSH OUTPUT\n// The SSH node returns the standard output (stdout)\n// We expect the python script to print a JSON string at the end\n\nconst sshOutput = items[0].json.stdout;\n\n// Find the JSON part (in case there are git logs before it)\nconst jsonString = sshOutput.match(/{.*}/s)[0];\nconst metrics = JSON.parse(jsonString);\n\nreturn [{\n  json: metrics\n}];"
+      },
+      "id": "parse-results",
+      "name": "Parse Metrics",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        680,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "fromEmail": "bot@quant-lab.com",
+        "toEmail": "trader@quant-lab.com",
+        "subject": "={{ $json.sharpe_ratio > 1.5 ? '✅ PASSED' : '⚠️ FAILED' }}: Strategy Backtest Report",
+        "text": "Strategy Performance:\nSharpe: {{ $json.sharpe_ratio }}\nDrawdown: {{ $json.max_drawdown }}%",
+        "html": "<h3>Strategy CI/CD Report</h3>\n<ul>\n<li><b>Status:</b> {{ $json.status }}</li>\n<li><b>Sharpe Ratio:</b> {{ $json.sharpe_ratio }}</li>\n<li><b>Max Drawdown:</b> <span style=\"color:red\">{{ $json.max_drawdown }}%</span></li>\n<li><b>Total Return:</b> {{ $json.total_return_pct }}%</li>\n</ul>\n<br>\n<i>Run triggered by GitHub Push</i>"
+      },
+      "id": "email-report",
+      "name": "Email Report",
+      "type": "n8n-nodes-base.email",
+      "typeVersion": 2,
+      "position": [
+        900,
+        300
+      ],
+      "credentials": {
+        "smtp": {
+          "id": "YOUR_SMTP_ID",
+          "name": "SMTP account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "GitHub Push": {
+      "main": [
+        [
+          {
+            "node": "SSH (Run Backtest)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SSH (Run Backtest)": {
+      "main": [
+        [
+          {
+            "node": "Parse Metrics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Metrics": {
+      "main": [
+        [
+          {
+            "node": "Email Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}
