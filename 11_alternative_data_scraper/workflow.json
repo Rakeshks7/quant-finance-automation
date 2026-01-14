@@ -1,0 +1,193 @@
+{
+  "name": "11_Alternative_Data_Scraper",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 9 * * 1"
+            }
+          ]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "Weekly Scrape (Mon 9AM)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [
+        200,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://www.bbc.com/sport/formula1/calendar",
+        "options": {}
+      },
+      "id": "fetch-html",
+      "name": "Fetch Website (HTTP)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        420,
+        300
+      ],
+      "notes": "Fetches raw HTML from sports site"
+    },
+    {
+      "parameters": {
+        "jsCode": "// MOCK HTML EXTRACTION\n// Simulating the extraction of a specific div containing race results\n// In production, use the 'HTML Extract' node with CSS Selectors\n\nconst rawText = \"Grand Prix: Monaco. Date: 25 May. Winner: Charles Leclerc (Ferrari). Second: Oscar Piastri (McLaren). Third: Carlos Sainz (Ferrari).\";\n\nreturn [{ json: { raw_text: rawText, source_url: \"bbc.com/f1\" } }];"
+      },
+      "id": "mock-scrape",
+      "name": "Mock HTML Extract",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        640,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "gpt-4o",
+          "mode": "list",
+          "cachedResultName": "gpt-4o"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "Extract the race results from this text into a structured JSON.\nText: \"{{ $json.raw_text }}\"\n\nReturn JSON List ONLY:\n[\n  { \"category\": \"F1_RACE\", \"metric\": \"Winner\", \"value\": \"Driver Name (Team)\" },\n  { \"category\": \"F1_RACE\", \"metric\": \"Winning_Team\", \"value\": \"Team Name\" }\n]"
+            }
+          ]
+        },
+        "jsonOutput": true
+      },
+      "id": "ai-structurer",
+      "name": "AI Data Structurer",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 1,
+      "position": [
+        860,
+        300
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "YOUR_OPENAI_ID",
+          "name": "OpenAI account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// PREPARE FOR SQL\nconst results = items[0].json;\nconst source = $('Mock HTML Extract').first().json.source_url;\n\nreturn results.map(r => ({\n  json: {\n    event_date: new Date().toISOString(),\n    category: r.category,\n    metric_name: r.metric,\n    metric_value: r.value,\n    raw_source: source\n  }\n}));"
+      },
+      "id": "format-sql",
+      "name": "Format for SQL",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1080,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "schema": {
+          "__rl": true,
+          "value": "public",
+          "mode": "list",
+          "cachedResultName": "public"
+        },
+        "table": {
+          "__rl": true,
+          "value": "alt_data_metrics",
+          "mode": "list",
+          "cachedResultName": "alt_data_metrics"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": []
+        },
+        "options": {}
+      },
+      "id": "db-insert",
+      "name": "Postgres Insert",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.2,
+      "position": [
+        1300,
+        300
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_ID",
+          "name": "Postgres account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Weekly Scrape (Mon 9AM)": {
+      "main": [
+        [
+          {
+            "node": "Fetch Website (HTTP)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Website (HTTP)": {
+      "main": [
+        [
+          {
+            "node": "Mock HTML Extract",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mock HTML Extract": {
+      "main": [
+        [
+          {
+            "node": "AI Data Structurer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Data Structurer": {
+      "main": [
+        [
+          {
+            "node": "Format for SQL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format for SQL": {
+      "main": [
+        [
+          {
+            "node": "Postgres Insert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}
