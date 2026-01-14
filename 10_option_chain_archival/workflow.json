@@ -1,0 +1,148 @@
+{
+  "name": "10_Option_Chain_Archival",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "*/3 9-15 * * 1-5"
+            }
+          ]
+        }
+      },
+      "id": "market-hours",
+      "name": "Market Hours (Every 3m)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [
+        200,
+        300
+      ],
+      "notes": "Runs every 3 mins from 9am to 3pm, Mon-Fri"
+    },
+    {
+      "parameters": {
+        "url": "https://www.nseindia.com/api/option-chain-indices?symbol=NIFTY",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true
+            }
+          }
+        }
+      },
+      "id": "fetch-chain",
+      "name": "Fetch NIFTY Chain",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        450,
+        300
+      ],
+      "notes": "Requires Headers/Cookies to bypass NSE blocks. Use a Broker API for stability."
+    },
+    {
+      "parameters": {
+        "jsCode": "// MOCK OPTION CHAIN DATA\n// (Since NSE API blocks direct requests without cookies, we mock the response structure here)\n\nreturn [{\n  json: {\n    records: {\n      timestamp: new Date().toISOString(),\n      data: [\n        {\n          strikePrice: 21000,\n          expiryDate: \"28-Jan-2026\",\n          CE: { lastPrice: 150.5, openInterest: 50000, totalTradedVolume: 12000, impliedVolatility: 12.5 },\n          PE: { lastPrice: 45.0, openInterest: 120000, totalTradedVolume: 35000, impliedVolatility: 14.2 }\n        },\n        {\n          strikePrice: 21100,\n          expiryDate: \"28-Jan-2026\",\n          CE: { lastPrice: 100.2, openInterest: 75000, totalTradedVolume: 18000, impliedVolatility: 11.8 },\n          PE: { lastPrice: 85.0, openInterest: 90000, totalTradedVolume: 22000, impliedVolatility: 13.5 }\n        }\n      ]\n    }\n  }\n}];"
+      },
+      "id": "mock-nse-data",
+      "name": "Mock NSE Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        450,
+        500
+      ],
+      "notes": "Remove this node and connect 'Fetch NIFTY Chain' in production"
+    },
+    {
+      "parameters": {
+        "language": "python",
+        "pythonCode": "# FLATTEN JSON TO TABLE ROWS\ninput_data = items[0].json['records']['data']\ntimestamp = items[0].json['records']['timestamp']\n\nflat_rows = []\n\nfor strike in input_data:\n    expiry = strike['expiryDate']\n    strike_price = strike['strikePrice']\n    \n    # Process Call Option (CE)\n    if 'CE' in strike:\n        ce = strike['CE']\n        flat_rows.append({\n            \"timestamp\": timestamp,\n            \"symbol\": \"NIFTY\",\n            \"expiry\": expiry,\n            \"strike\": strike_price,\n            \"type\": \"CE\",\n            \"ltp\": ce['lastPrice'],\n            \"oi\": ce['openInterest'],\n            \"vol\": ce['totalTradedVolume'],\n            \"iv\": ce['impliedVolatility']\n        })\n        \n    # Process Put Option (PE)\n    if 'PE' in strike:\n        pe = strike['PE']\n        flat_rows.append({\n            \"timestamp\": timestamp,\n            \"symbol\": \"NIFTY\",\n            \"expiry\": expiry,\n            \"strike\": strike_price,\n            \"type\": \"PE\",\n            \"ltp\": pe['lastPrice'],\n            \"oi\": pe['openInterest'],\n            \"vol\": pe['totalTradedVolume'],\n            \"iv\": pe['impliedVolatility']\n        })\n\nreturn [{\"json\": row} for row in flat_rows]"
+      },
+      "id": "python-flattener",
+      "name": "Python Flattener",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        700,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "schema": {
+          "__rl": true,
+          "value": "public",
+          "mode": "list",
+          "cachedResultName": "public"
+        },
+        "table": {
+          "__rl": true,
+          "value": "option_chain_history",
+          "mode": "list",
+          "cachedResultName": "option_chain_history"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": []
+        },
+        "options": {}
+      },
+      "id": "db-insert",
+      "name": "Postgres Insert",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.2,
+      "position": [
+        950,
+        300
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_ID",
+          "name": "Postgres account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Market Hours (Every 3m)": {
+      "main": [
+        [
+          {
+            "node": "Mock NSE Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mock NSE Data": {
+      "main": [
+        [
+          {
+            "node": "Python Flattener",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Python Flattener": {
+      "main": [
+        [
+          {
+            "node": "Postgres Insert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}
