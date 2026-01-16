@@ -1,0 +1,116 @@
+{
+  "name": "12_Strategy_Optimization_WFA",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 18 * * 0"
+            }
+          ]
+        }
+      },
+      "id": "sunday-trigger",
+      "name": "Weekly Optimization (Sun 6PM)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [
+        200,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "command": "python3 /opt/quant-lab/optimize.py"
+      },
+      "id": "ssh-optimize",
+      "name": "SSH (Run Grid Search)",
+      "type": "n8n-nodes-base.ssh",
+      "typeVersion": 1,
+      "position": [
+        450,
+        300
+      ],
+      "credentials": {
+        "sshPassword": {
+          "id": "YOUR_SSH_ID",
+          "name": "Optimization Server SSH"
+        }
+      },
+      "notes": "Runs the heavy Python script remotely"
+    },
+    {
+      "parameters": {
+        "jsCode": "// PARSE OUTPUT\n// Extracts the JSON result from the SSH stdout\nconst output = items[0].json.stdout;\nconst jsonPart = output.match(/{.*}/s)[0];\nreturn [{ json: JSON.parse(jsonPart) }];"
+      },
+      "id": "parse-params",
+      "name": "Extract New Params",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        680,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "fromEmail": "bot@quant-lab.com",
+        "toEmail": "trader@quant-lab.com",
+        "subject": "🚀 New Optimized Params for {{ $json.asset }}",
+        "text": "Optimization Complete.\nNew Fast MA: {{ $json.best_params.fast_ma }}\nNew Slow MA: {{ $json.best_params.slow_ma }}\nExpected Sharpe: {{ $json.score }}",
+        "html": "<h3>Weekly Walk-Forward Analysis Complete</h3>\n<p>The algo has re-calibrated for the current volatility regime.</p>\n<table border=\"1\" cellpadding=\"5\">\n  <tr>\n    <th>Parameter</th>\n    <th>New Value</th>\n  </tr>\n  <tr>\n    <td>Fast MA</td>\n    <td><b>{{ $json.best_params.fast_ma }}</b></td>\n  </tr>\n  <tr>\n    <td>Slow MA</td>\n    <td><b>{{ $json.best_params.slow_ma }}</b></td>\n  </tr>\n  <tr>\n    <td>Stop Loss</td>\n    <td>{{ $json.best_params.stop_loss_pct * 100 }}%</td>\n  </tr>\n</table>\n<br>\n<b>Expected Performance (Sharpe):</b> {{ $json.score }}"
+      },
+      "id": "email-report",
+      "name": "Email New Config",
+      "type": "n8n-nodes-base.email",
+      "typeVersion": 2,
+      "position": [
+        900,
+        300
+      ],
+      "credentials": {
+        "smtp": {
+          "id": "YOUR_SMTP_ID",
+          "name": "SMTP account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Weekly Optimization (Sun 6PM)": {
+      "main": [
+        [
+          {
+            "node": "SSH (Run Grid Search)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SSH (Run Grid Search)": {
+      "main": [
+        [
+          {
+            "node": "Extract New Params",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract New Params": {
+      "main": [
+        [
+          {
+            "node": "Email New Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}
