@@ -1,0 +1,169 @@
+{
+  "name": "13_Real_Time_Tax_Monitor",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "tax_calc_hook",
+        "options": {}
+      },
+      "id": "broker-webhook",
+      "name": "Webhook (Order Sold)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        200,
+        300
+      ],
+      "webhookId": "tax_calc_endpoint",
+      "notes": "Payload: { \"ticker\": \"RELIANCE\", \"qty\": 10, \"sell_price\": 2500, \"sell_date\": \"2026-01-15\" }"
+    },
+    {
+      "parameters": {
+        "jsCode": "// MOCK DATABASE FETCH (FIFO)\n// Simulating fetching the oldest 'OPEN' buy record for this ticker\n\nconst sellOrder = items[0].json.body;\n\n// Simulate a Buy from 14 months ago (LTCG scenario) or 2 months ago (STCG)\n// Let's simulate a BUY from 2024-11-01 (approx 14 months before sell_date)\n\nreturn [{\n  json: {\n    buy_id: 101,\n    ticker: sellOrder.ticker,\n    buy_date: \"2024-11-01\",\n    buy_price: 1800.00,\n    quantity: sellOrder.qty, // Assuming exact match for simplicity\n    sell_price: sellOrder.sell_price,\n    sell_date: sellOrder.sell_date\n  }\n}];"
+      },
+      "id": "fetch-cost-basis",
+      "name": "Fetch Cost Basis (FIFO)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        450,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "language": "python",
+        "pythonCode": "# TAX LOGIC ENGINE\nfrom datetime import datetime\n\ndata = items[0].json\n\n# Parse Dates\nbuy_date = datetime.strptime(data['buy_date'], '%Y-%m-%d')\nsell_date = datetime.strptime(data['sell_date'], '%Y-%m-%d')\n\n# 1. Calculate Profit\nprofit = (data['sell_price'] - data['buy_price']) * data['quantity']\n\n# 2. Calculate Holding Period\ndelta = sell_date - buy_date\ndays_held = delta.days\n\n# 3. Apply Tax Rules (India Equity Example)\n# STCG (< 12 months): 20%\n# LTCG (> 12 months): 12.5%\n\nif days_held < 365:\n    tax_type = \"STCG\"\n    tax_rate = 0.20\nelif days_held >= 365:\n    tax_type = \"LTCG\"\n    tax_rate = 0.125\n\n# If loss, tax is 0 (but we record the loss for set-off)\ntax_amount = profit * tax_rate if profit > 0 else 0\n\nreturn [{\n  \"json\": {\n    \"trade_ref_id\": data['buy_id'],\n    \"profit\": profit,\n    \"days_held\": days_held,\n    \"tax_type\": tax_type,\n    \"tax_rate\": tax_rate,\n    \"estimated_tax\": round(tax_amount, 2)\n  }\n}]"
+      },
+      "id": "tax-engine",
+      "name": "Python Tax Engine",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        700,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "schema": {
+          "__rl": true,
+          "value": "public",
+          "mode": "list",
+          "cachedResultName": "public"
+        },
+        "table": {
+          "__rl": true,
+          "value": "tax_provision_ledger",
+          "mode": "list",
+          "cachedResultName": "tax_provision_ledger"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": []
+        },
+        "options": {}
+      },
+      "id": "insert-ledger",
+      "name": "Update Tax Ledger",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.2,
+      "position": [
+        950,
+        300
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_ID",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "channel": "tax-alerts",
+        "text": "💰 *Tax Provision Alert*",
+        "attachments": [
+          {
+            "color": "#FFCC00",
+            "fields": [
+              {
+                "title": "Realized Gain",
+                "value": "₹{{ $json.profit }}",
+                "short": true
+              },
+              {
+                "title": "Tax Type",
+                "value": "{{ $json.tax_type }} ({{ $json.days_held }} days)",
+                "short": true
+              },
+              {
+                "title": "Set Aside",
+                "value": "₹{{ $json.estimated_tax }}",
+                "short": true
+              }
+            ]
+          }
+        ]
+      },
+      "id": "slack-alert",
+      "name": "Slack Alert",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.1,
+      "position": [
+        1150,
+        300
+      ],
+      "credentials": {
+        "slackApi": {
+          "id": "YOUR_SLACK_ID",
+          "name": "Slack account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook (Order Sold)": {
+      "main": [
+        [
+          {
+            "node": "Fetch Cost Basis (FIFO)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Cost Basis (FIFO)": {
+      "main": [
+        [
+          {
+            "node": "Python Tax Engine",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Python Tax Engine": {
+      "main": [
+        [
+          {
+            "node": "Update Tax Ledger",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Slack Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}
