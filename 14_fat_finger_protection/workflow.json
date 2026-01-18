@@ -1,0 +1,231 @@
+{
+  "name": "14_Fat_Finger_Protection",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "risk_gateway",
+        "options": {}
+      },
+      "id": "order-trigger",
+      "name": "Webhook (Incoming Order)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        200,
+        300
+      ],
+      "webhookId": "risk_gateway_endpoint",
+      "notes": "Payload: { \"ticker\": \"AAPL\", \"qty\": 5000, \"price\": 150, \"strategy\": \"Breakout\" }"
+    },
+    {
+      "parameters": {
+        "jsCode": "// MOCK NAV LOOKUP\n// In prod, fetch this from your Broker API (e.g., GET /account/equity)\nreturn [{\n  json: {\n    nav: 100000.00, // $100k Account\n    currency: \"USD\"\n  }\n}];"
+      },
+      "id": "fetch-nav",
+      "name": "Get Account NAV",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        450,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// MOCK CONFIG LOAD\n// In prod, read from risk_limits.json\nreturn [{\n  json: {\n    max_order_value_pct: 0.05,\n    max_shares: 1000,\n    restricted: [\"GME\", \"AMC\"]\n  }\n}];"
+      },
+      "id": "fetch-limits",
+      "name": "Load Risk Limits",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        450,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combinationMode": "mergeByPosition",
+        "options": {}
+      },
+      "id": "merge-data",
+      "name": "Merge Context",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 2,
+      "position": [
+        650,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// RISK ENGINE LOGIC\nconst order = $('Webhook (Incoming Order)').first().json.body;\nconst nav = $('Get Account NAV').first().json.nav;\nconst limits = $('Load Risk Limits').first().json;\n\nconst order_value = order.price * order.qty;\nconst limit_value = nav * limits.max_order_value_pct;\n\nlet rejection_reason = null;\n\n// Rule 1: Fat Finger (Value Check)\nif (order_value > limit_value) {\n  rejection_reason = `FAT FINGER: Order Value $${order_value} exceeds 5% of NAV ($${limit_value})`;\n}\n\n// Rule 2: Max Quantity\nif (order.qty > limits.max_shares) {\n  rejection_reason = `QTY LIMIT: ${order.qty} shares exceeds max of ${limits.max_shares}`;\n}\n\n// Rule 3: Blacklist\nif (limits.restricted.includes(order.ticker)) {\n  rejection_reason = `RESTRICTED: ${order.ticker} is on the trading blacklist`;\n}\n\nreturn [{\n  json: {\n    passed: rejection_reason === null,\n    reason: rejection_reason,\n    ...order\n  }\n}];"
+      },
+      "id": "risk-logic",
+      "name": "Validate Rules",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        850,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.passed }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "risk-gate",
+      "name": "Approved?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        1050,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://api.broker.com/v1/orders",
+        "method": "POST",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "symbol",
+              "value": "={{ $json.ticker }}"
+            },
+            {
+              "name": "qty",
+              "value": "={{ $json.qty }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "broker-api",
+      "name": "Send to Broker",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1300,
+        200
+      ],
+      "notes": "Order is safe. Execute."
+    },
+    {
+      "parameters": {
+        "channel": "risk-alerts",
+        "text": "🛑 *ORDER BLOCKED*",
+        "attachments": [
+          {
+            "color": "#ff0000",
+            "fields": [
+              {
+                "title": "Reason",
+                "value": "{{ $json.reason }}",
+                "short": false
+              },
+              {
+                "title": "Attempted Order",
+                "value": "{{ $json.qty }} x {{ $json.ticker }} @ ${{ $json.price }}",
+                "short": false
+              }
+            ]
+          }
+        ]
+      },
+      "id": "block-alert",
+      "name": "Alert Risk Mgr",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.1,
+      "position": [
+        1300,
+        400
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook (Incoming Order)": {
+      "main": [
+        [
+          {
+            "node": "Merge Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Account NAV": {
+      "main": [
+        [
+          {
+            "node": "Merge Context",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Load Risk Limits": {
+      "main": [
+        [
+          {
+            "node": "Merge Context",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Merge Context": {
+      "main": [
+        [
+          {
+            "node": "Validate Rules",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Rules": {
+      "main": [
+        [
+          {
+            "node": "Approved?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Approved?": {
+      "main": [
+        [
+          {
+            "node": "Send to Broker",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Alert Risk Mgr",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}
