@@ -1,0 +1,6 @@
+{
+  "max_order_value_pct": 0.05,     
+  "max_shares_per_order": 1000,
+  "restricted_tickers": ["GME", "AMC"],
+  "require_manual_approval_above": 50000
+}
