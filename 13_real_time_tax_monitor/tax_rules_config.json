@@ -1,0 +1,14 @@
+{
+  "equity": {
+    "stcg_rate": 0.20,
+    "ltcg_rate": 0.125,
+    "ltcg_threshold_days": 365
+  },
+  "debt": {
+    "stcg_rate": "slab",
+    "ltcg_rate": 0.20,
+    "ltcg_threshold_days": 1095
+  },
+  "financial_year": "2025-2026",
+  "currency": "INR"
+}
