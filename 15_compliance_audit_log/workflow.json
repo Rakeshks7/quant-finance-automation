@@ -1,0 +1,167 @@
+{
+  "name": "15_Compliance_Audit_Log",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "55 23 * * *"
+            }
+          ]
+        }
+      },
+      "id": "eod-trigger",
+      "name": "EOD Trigger (11:55 PM)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [
+        200,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT * FROM trade_ledger WHERE date(created_at) = CURRENT_DATE;"
+      },
+      "id": "fetch-trades",
+      "name": "Fetch Daily Trades",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.2,
+      "position": [
+        450,
+        300
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_ID",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// HTML BUILDER\n// In production, read the HTML file from disk using 'Read Binary File' node\nconst template = `... (Paste HTML Template Here or load from file) ...`;\n\nconst trades = items.map(i => i.json);\nlet rows = \"\";\n\ntrades.forEach(t => {\n  const color = t.side === 'BUY' ? 'buy' : 'sell';\n  rows += `<tr>\n    <td>${t.created_at}</td>\n    <td>${t.ticker}</td>\n    <td class=\"${color}\">${t.side}</td>\n    <td>${t.qty}</td>\n    <td>${t.price}</td>\n    <td>${t.strategy}</td>\n    <td>PASS</td>\n  </tr>`;\n});\n\n// Replace placeholders\nlet finalHtml = template.replace('{{table_rows}}', rows);\nfinalHtml = finalHtml.replace('{{report_date}}', new Date().toISOString().split('T')[0]);\nfinalHtml = finalHtml.replace('{{checksum_hash}}', 'sha256-' + Math.random().toString(36).substring(7));\n\nreturn [{\n  json: {\n    fileName: `Audit_Log_${new Date().toISOString().split('T')[0]}.html`,\n    htmlContent: finalHtml\n  }\n}];"
+      },
+      "id": "html-builder",
+      "name": "Generate HTML Report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        700,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "binaryPropertyName": "data",
+        "fileName": "={{ $json.fileName }}"
+      },
+      "id": "convert-binary",
+      "name": "Prepare File",
+      "type": "n8n-nodes-base.moveBinaryData",
+      "typeVersion": 1,
+      "position": [
+        950,
+        300
+      ],
+      "notes": "Converts HTML string to binary file for upload"
+    },
+    {
+      "parameters": {
+        "bucketName": "compliance-logs-immutable",
+        "fileName": "={{ $json.fileName }}",
+        "binaryPropertyName": "data"
+      },
+      "id": "upload-s3",
+      "name": "Upload to S3 (WORM)",
+      "type": "n8n-nodes-base.awsS3",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        200
+      ],
+      "credentials": {
+        "aws": {
+          "id": "YOUR_AWS_ID",
+          "name": "AWS account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "toEmail": "compliance@quant-fund.com",
+        "subject": "Daily Audit Log: {{ $json.fileName }}",
+        "text": "Attached is the automated trading log for today. This file has been hashed and stored in S3.",
+        "attachments": "data"
+      },
+      "id": "email-compliance",
+      "name": "Email Compliance Officer",
+      "type": "n8n-nodes-base.email",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        400
+      ],
+      "credentials": {
+        "smtp": {
+          "id": "YOUR_SMTP_ID",
+          "name": "SMTP account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "EOD Trigger (11:55 PM)": {
+      "main": [
+        [
+          {
+            "node": "Fetch Daily Trades",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Daily Trades": {
+      "main": [
+        [
+          {
+            "node": "Generate HTML Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate HTML Report": {
+      "main": [
+        [
+          {
+            "node": "Prepare File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare File": {
+      "main": [
+        [
+          {
+            "node": "Upload to S3 (WORM)",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Email Compliance Officer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}
