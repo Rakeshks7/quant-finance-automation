@@ -1,0 +1,102 @@
+{
+  "name": "16_Frontend_Backend_Sync",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "app_sync",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook (Python Algo)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        200,
+        300
+      ],
+      "webhookId": "app_sync_endpoint"
+    },
+    {
+      "parameters": {
+        "operation": "create",
+        "projectId": {
+          "__rl": true,
+          "value": "YOUR_FIREBASE_PROJECT_ID",
+          "mode": "list",
+          "cachedResultName": "quant-journal-app"
+        },
+        "collection": "trade_signals",
+        "options": {},
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": []
+        }
+      },
+      "id": "firestore-create",
+      "name": "Firestore (Create Doc)",
+      "type": "n8n-nodes-base.googleFirestore",
+      "typeVersion": 1,
+      "position": [
+        450,
+        300
+      ],
+      "credentials": {
+        "googleFirebaseFirestoreOAuth2Api": {
+          "id": "YOUR_FIRESTORE_CREDENTIAL_ID",
+          "name": "Google Firestore account"
+        }
+      },
+      "notes": "Maps JSON body directly to Firestore fields"
+    },
+    {
+      "parameters": {
+        "title": "🚀 New Signal: {{ $json.body.ticker }}",
+        "body": "Action: {{ $json.body.action }} @ ${{ $json.body.entry_price }}\nConfidence: {{ $json.body.confidence_score * 100 }}%",
+        "tokens": [
+          "YOUR_DEVICE_FCM_TOKEN"
+        ]
+      },
+      "id": "fcm-push",
+      "name": "FCM (Push Notification)",
+      "type": "n8n-nodes-base.googleFirebaseCloudMessaging",
+      "typeVersion": 1,
+      "position": [
+        700,
+        300
+      ],
+      "credentials": {
+        "googleFirebaseCloudMessagingApi": {
+          "id": "YOUR_FCM_CREDENTIAL_ID",
+          "name": "Google FCM account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook (Python Algo)": {
+      "main": [
+        [
+          {
+            "node": "Firestore (Create Doc)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Firestore (Create Doc)": {
+      "main": [
+        [
+          {
+            "node": "FCM (Push Notification)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}
