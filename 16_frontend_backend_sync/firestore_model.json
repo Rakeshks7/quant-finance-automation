@@ -1,0 +1,14 @@
+{
+  "collection": "trade_signals",
+  "document_structure": {
+    "ticker": "AAPL",
+    "action": "BUY",
+    "entry_price": 150.25,
+    "stop_loss": 145.00,
+    "take_profit": 160.00,
+    "confidence_score": 0.85,
+    "timestamp": "2026-01-08T10:30:00Z",
+    "status": "ACTIVE",  // ACTIVE, FILLED, EXPIRED
+    "is_read": false
+  }
+}
