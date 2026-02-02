@@ -1,0 +1,197 @@
+{
+  "name": "17_Club_Member_Onboarding",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "club_application",
+        "options": {}
+      },
+      "id": "form-trigger",
+      "name": "Webhook (Typeform)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        200,
+        300
+      ],
+      "webhookId": "club_app_endpoint",
+      "notes": "Payload: { \"name\": \"Candidate\", \"email\": \"test@email.com\", \"answers\": {\"q1\": \"B\", \"q2\": \"A\", \"q3\": \"C\", \"q4\": \"A\", \"q5\": \"B\"} }"
+    },
+    {
+      "parameters": {
+        "jsCode": "// AUTO-GRADER LOGIC\nconst applicant = items[0].json.body;\n\n// Correct Answers (Load from JSON file in prod)\nconst key = {\n  \"q1\": \"B\",\n  \"q2\": \"A\",\n  \"q3\": \"C\",\n  \"q4\": \"A\",\n  \"q5\": \"D\"\n};\n\nlet score = 0;\nlet total = 5;\n\n// Grading Loop\nfor (const [question, answer] of Object.entries(key)) {\n  if (applicant.answers[question] === answer) {\n    score++;\n  }\n}\n\nconst percentage = (score / total) * 100;\n\nreturn [{\n  json: {\n    name: applicant.name,\n    email: applicant.email,\n    score: percentage,\n    passed: percentage >= 80\n  }\n}];"
+      },
+      "id": "auto-grader",
+      "name": "Score Quiz",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        450,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.passed }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "pass-fail-switch",
+      "name": "Passed > 80%?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        650,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "databasePage",
+        "operation": "create",
+        "databaseId": {
+          "__rl": true,
+          "value": "YOUR_NOTION_DB_ID",
+          "mode": "list",
+          "cachedResultName": "Praxis Members"
+        },
+        "propertiesUi": {
+          "propertyValues": [
+            {
+              "key": "Name",
+              "title": "{{ $json.name }}"
+            },
+            {
+              "key": "Score",
+              "number": "{{ $json.score }}"
+            },
+            {
+              "key": "Status",
+              "select": "Active Member"
+            },
+            {
+              "key": "Email",
+              "email": "{{ $json.email }}"
+            }
+          ]
+        }
+      },
+      "id": "notion-add",
+      "name": "Add to Notion DB",
+      "type": "n8n-nodes-base.notion",
+      "typeVersion": 2,
+      "position": [
+        900,
+        200
+      ],
+      "credentials": {
+        "notionApi": {
+          "id": "YOUR_NOTION_ID",
+          "name": "Notion account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "toEmail": "={{ $json.email }}",
+        "subject": "🎉 Welcome to Praxis Finance Club!",
+        "text": "Congratulations {{ $json.name }},\n\nYou scored {{ $json.score }}% on the entrance exam. You have been accepted.\n\nJoin our Discord Server here: https://discord.gg/YOUR_INVITE_CODE",
+        "html": "<h3>Welcome to the Club</h3><p>You scored <b>{{ $json.score }}%</b>. We are impressed.</p><a href=\"https://discord.gg/YOUR_INVITE_CODE\">Click here to join the Discord</a>"
+      },
+      "id": "send-invite",
+      "name": "Send Discord Invite",
+      "type": "n8n-nodes-base.email",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        200
+      ],
+      "credentials": {
+        "smtp": {
+          "id": "YOUR_SMTP_ID",
+          "name": "SMTP account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "toEmail": "={{ $json.email }}",
+        "subject": "Update on your Praxis Application",
+        "text": "Hi {{ $json.name }},\n\nThank you for applying. Unfortunately, your score of {{ $json.score }}% did not meet our cutoff of 80%.\n\nPlease study the material and re-apply next month."
+      },
+      "id": "send-reject",
+      "name": "Send Rejection",
+      "type": "n8n-nodes-base.email",
+      "typeVersion": 2,
+      "position": [
+        900,
+        450
+      ],
+      "credentials": {
+        "smtp": {
+          "id": "YOUR_SMTP_ID",
+          "name": "SMTP account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook (Typeform)": {
+      "main": [
+        [
+          {
+            "node": "Score Quiz",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Score Quiz": {
+      "main": [
+        [
+          {
+            "node": "Passed > 80%?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Passed > 80%?": {
+      "main": [
+        [
+          {
+            "node": "Add to Notion DB",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Rejection",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Add to Notion DB": {
+      "main": [
+        [
+          {
+            "node": "Send Discord Invite",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}
