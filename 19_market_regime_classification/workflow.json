@@ -1,0 +1,149 @@
+{
+  "name": "19_Market_Regime_Classification",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "30 8 * * 1-5"
+            }
+          ]
+        }
+      },
+      "id": "pre-market-trigger",
+      "name": "Pre-Market (8:30 AM)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [
+        200,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// MOCK MARKET DATA\n// In prod, fetch 200 days of OHLCV via HTTP Request\nreturn [{\n  json: {\n    index_price: 21500,\n    sma_50: 21200,\n    sma_200: 20500,\n    vix: 14.5\n  }\n}];"
+      },
+      "id": "fetch-data",
+      "name": "Fetch Technicals",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        450,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "language": "python",
+        "pythonCode": "# REGIME CLASSIFICATION LOGIC\ndata = items[0].json\nprice = data['index_price']\nsma200 = data['sma_200']\nvix = data['vix']\n\n# 1. Determine Trend (Simple Moving Average Rule)\nif price > sma200:\n    trend = \"BULL\"\nelse:\n    trend = \"BEAR\"\n\n# 2. Determine Volatility State\nif vix < 15:\n    vol_state = \"LOW\"\nelif vix < 25:\n    vol_state = \"HIGH\"\nelse:\n    vol_state = \"EXTREME\"\n\n# 3. Create Composite Regime Code\nregime_code = f\"{trend}_{vol_state}_VOL\"\n\n# 4. Decide Allowed Strategies\nallowed_strats = []\nif regime_code == \"BULL_LOW_VOL\":\n    allowed_strats = [\"trend_following\", \"leverage_long\"]\nelif regime_code == \"BEAR_HIGH_VOL\":\n    allowed_strats = [\"short_selling\", \"hedging\"]\nelse:\n    allowed_strats = [\"cash_preservation\"]\n\nreturn [{\n  \"json\": {\n    \"last_updated\": datetime.now().isoformat(),\n    \"primary_trend\": trend,\n    \"volatility_state\": vol_state,\n    \"regime_code\": regime_code,\n    \"active_strategies\": allowed_strats\n  }\n}]"
+      },
+      "id": "python-classifier",
+      "name": "Classify Regime",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        700,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "fileContent": "={{ JSON.stringify($json, null, 2) }}",
+        "fileName": "/opt/quant-lab/current_regime.json"
+      },
+      "id": "update-file",
+      "name": "Write Config File",
+      "type": "n8n-nodes-base.writeToFile",
+      "typeVersion": 1,
+      "position": [
+        950,
+        300
+      ],
+      "notes": "Updates the global state file"
+    },
+    {
+      "parameters": {
+        "channel": "algo-status",
+        "text": "🚦 *Market Regime Updated*",
+        "attachments": [
+          {
+            "color": "={{ $json.primary_trend == 'BULL' ? '#36a64f' : '#ff0000' }}",
+            "fields": [
+              {
+                "title": "Regime",
+                "value": "{{ $json.regime_code }}",
+                "short": true
+              },
+              {
+                "title": "VIX",
+                "value": "{{ $('Fetch Technicals').first().json.vix }}",
+                "short": true
+              },
+              {
+                "title": "Active Strategies",
+                "value": "{{ $json.active_strategies.join(', ') }}",
+                "short": false
+              }
+            ]
+          }
+        ]
+      },
+      "id": "slack-alert",
+      "name": "Notify Team",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.1,
+      "position": [
+        950,
+        500
+      ],
+      "credentials": {
+        "slackApi": {
+          "id": "YOUR_SLACK_ID",
+          "name": "Slack account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Pre-Market (8:30 AM)": {
+      "main": [
+        [
+          {
+            "node": "Fetch Technicals",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Technicals": {
+      "main": [
+        [
+          {
+            "node": "Classify Regime",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Classify Regime": {
+      "main": [
+        [
+          {
+            "node": "Write Config File",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Notify Team",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}
