@@ -1,0 +1,189 @@
+{
+  "name": "18_Dynamic_Universe_Selection",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 0 1 * *"
+            }
+          ]
+        }
+      },
+      "id": "monthly-trigger",
+      "name": "Monthly Trigger (1st)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [
+        200,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// MOCK WHOLE MARKET DATA (5000+ STOCKS)\n// Generating random stocks to simulate a raw data feed\nconst sectors = ['Tech', 'Health', 'Energy', 'Finance'];\nconst universe = [];\n\nfor (let i = 0; i < 50; i++) { // Generating 50 mock rows for demo\n  universe.push({\n    ticker: `STK_${i}`,\n    sector: sectors[Math.floor(Math.random() * sectors.length)],\n    price: (Math.random() * 200).toFixed(2),\n    market_cap_bn: (Math.random() * 50).toFixed(2), // 0 to 50 Billion\n    avg_volume: Math.floor(Math.random() * 2000000) // 0 to 2M\n  });\n}\n\nreturn universe.map(s => ({ json: s }));"
+      },
+      "id": "fetch-market",
+      "name": "Fetch All Tickers",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        450,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "language": "python",
+        "pythonCode": "# UNIVERSE FILTER LOGIC\n# Rules: Cap > 2B, Volume > 1M, Price > 5\n\nall_stocks = [item.json for item in items]\nselected_universe = []\n\nfor stock in all_stocks:\n    cap = float(stock['market_cap_bn'])\n    vol = int(stock['avg_volume'])\n    price = float(stock['price'])\n    \n    if cap > 2.0 and vol > 1000000 and price > 5.0:\n        selected_universe.append(stock)\n\nreturn [{\"json\": s} for s in selected_universe]"
+      },
+      "id": "python-filter",
+      "name": "Filter Logic (Python)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        680,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "TRUNCATE TABLE active_universe;"
+      },
+      "id": "clear-db",
+      "name": "Clear Old Universe",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.2,
+      "position": [
+        900,
+        300
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_ID",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "schema": {
+          "__rl": true,
+          "value": "public",
+          "mode": "list",
+          "cachedResultName": "public"
+        },
+        "table": {
+          "__rl": true,
+          "value": "active_universe",
+          "mode": "list",
+          "cachedResultName": "active_universe"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [
+             {
+              "id": "ticker",
+              "displayName": "ticker",
+              "required": false,
+              "defaultMatch": true,
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "sector",
+              "displayName": "sector",
+              "required": false,
+              "defaultMatch": true,
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "market_cap_bn",
+              "displayName": "market_cap_bn",
+              "required": false,
+              "defaultMatch": true,
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "avg_volume",
+              "displayName": "avg_volume_30d",
+              "required": false,
+              "defaultMatch": true,
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "insert-new",
+      "name": "Insert New Universe",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.2,
+      "position": [
+        1150,
+        300
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_ID",
+          "name": "Postgres account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Monthly Trigger (1st)": {
+      "main": [
+        [
+          {
+            "node": "Fetch All Tickers",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch All Tickers": {
+      "main": [
+        [
+          {
+            "node": "Filter Logic (Python)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Logic (Python)": {
+      "main": [
+        [
+          {
+            "node": "Clear Old Universe",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clear Old Universe": {
+      "main": [
+        [
+          {
+            "node": "Insert New Universe",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}
