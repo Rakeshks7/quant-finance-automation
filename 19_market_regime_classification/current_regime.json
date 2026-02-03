@@ -1,0 +1,7 @@
+{
+  "last_updated": "2026-01-08T08:00:00Z",
+  "primary_trend": "BULL",         // BULL, BEAR, SIDEWAYS
+  "volatility_state": "LOW",       // LOW, HIGH, EXTREME
+  "regime_code": "BULL_LOW_VOL",
+  "active_strategies": ["trend_following", "mean_reversion"]
+}
