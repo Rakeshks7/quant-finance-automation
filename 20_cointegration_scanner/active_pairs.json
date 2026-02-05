@@ -1,0 +1,5 @@
+[
+  { "id": "PAIR_01", "stock_a": "HDFCBANK", "stock_b": "ICICIBANK", "status": "ACTIVE" },
+  { "id": "PAIR_02", "stock_a": "TCS", "stock_b": "INFY", "status": "ACTIVE" },
+  { "id": "PAIR_03", "stock_a": "KO", "stock_b": "PEP", "status": "WATCHLIST" }
+]
