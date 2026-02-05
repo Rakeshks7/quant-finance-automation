@@ -1,0 +1,160 @@
+{
+  "name": "20_Cointegration_Scanner",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 10 * * 6"
+            }
+          ]
+        }
+      },
+      "id": "weekly-scanner",
+      "name": "Weekly Scan (Sat 10AM)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [
+        200,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// MOCK PRICE DATA FETCH\n// In production, use HTTP Request to fetch 90d history for Stock A and B\nreturn [{\n  json: {\n    pair_id: \"PAIR_01\",\n    stock_a: \"HDFCBANK\",\n    stock_b: \"ICICIBANK\",\n    // Simulating two price arrays (correlated)\n    prices_a: [1500, 1510, 1520, 1515, 1525, 1530],\n    prices_b: [900, 905, 915, 910, 920, 925]\n  }\n}];"
+      },
+      "id": "fetch-history",
+      "name": "Fetch Price History",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        450,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "language": "python",
+        "pythonCode": "# ADF TEST SIMULATION\n# (Requires 'statsmodels' in real env, here we mock the math logic)\nimport random\n\ndata = items[0].json\n\n# 1. Calculate Spread (Simplified)\n# spread = prices_a - (hedge_ratio * prices_b)\n\n# 2. Run ADF Test\n# from statsmodels.tsa.stattools import adfuller\n# result = adfuller(spread)\n# p_value = result[1]\n\n# SIMULATION: Randomly generating p-value for demo\n# 90% chance of being healthy (<0.05), 10% chance of broken (>0.05)\np_value = random.uniform(0.01, 0.10)\n\nreturn [{\n  \"json\": {\n    \"pair\": f\"{data['stock_a']} vs {data['stock_b']}\",\n    \"p_value\": round(p_value, 4),\n    \"is_cointegrated\": p_value < 0.05,\n    \"action\": \"KEEP\" if p_value < 0.05 else \"REMOVE\"\n  }\n}]"
+      },
+      "id": "stats-engine",
+      "name": "Run ADF Test",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        700,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.is_cointegrated }}",
+              "value2": false
+            }
+          ]
+        }
+      },
+      "id": "check-break",
+      "name": "Relationship Broken?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        950,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "channel": "strategy-alerts",
+        "text": "⚠️ *COINTEGRATION BREAK DETECTED*",
+        "attachments": [
+          {
+            "color": "#ff0000",
+            "fields": [
+              {
+                "title": "Pair",
+                "value": "{{ $json.pair }}",
+                "short": true
+              },
+              {
+                "title": "ADF P-Value",
+                "value": "{{ $json.p_value }} (Target < 0.05)",
+                "short": true
+              },
+              {
+                "title": "Action",
+                "value": "STOP TRADING IMMEDIATELY",
+                "short": false
+              }
+            ]
+          }
+        ]
+      },
+      "id": "slack-alert",
+      "name": "Alert Risk Team",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.1,
+      "position": [
+        1200,
+        300
+      ],
+      "credentials": {
+        "slackApi": {
+          "id": "YOUR_SLACK_ID",
+          "name": "Slack account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Weekly Scan (Sat 10AM)": {
+      "main": [
+        [
+          {
+            "node": "Fetch Price History",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Price History": {
+      "main": [
+        [
+          {
+            "node": "Run ADF Test",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run ADF Test": {
+      "main": [
+        [
+          {
+            "node": "Relationship Broken?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Relationship Broken?": {
+      "main": [
+        [
+          {
+            "node": "Alert Risk Team",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}
