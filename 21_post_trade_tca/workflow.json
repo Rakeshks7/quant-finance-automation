@@ -1,0 +1,142 @@
+{
+  "name": "21_Post_Trade_TCA",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "trade_fill_tca",
+        "options": {}
+      },
+      "id": "fill-trigger",
+      "name": "Webhook (Trade Fill)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        200,
+        300
+      ],
+      "webhookId": "tca_endpoint",
+      "notes": "Payload: { \"trade_id\": \"T123\", \"ticker\": \"AAPL\", \"side\": \"BUY\", \"price\": 150.05, \"timestamp\": \"2026-01-08T10:00:01Z\" }"
+    },
+    {
+      "parameters": {
+        "url": "https://api.marketdata.com/v2/ticks/AAPL",
+        "options": {
+          "qs": {
+            "timestamp": "={{ $json.body.timestamp }}"
+          }
+        }
+      },
+      "id": "fetch-tick",
+      "name": "Fetch NBBO Tick",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        450,
+        300
+      ],
+      "notes": "Gets the Bid/Ask at the exact moment of execution"
+    },
+    {
+      "parameters": {
+        "jsCode": "// MOCK TICK DATA RESPONSE\nreturn [{\n  json: {\n    bid: 149.98,\n    ask: 150.02,\n    exchange: \"NASDAQ\"\n  }\n}];"
+      },
+      "id": "mock-tick",
+      "name": "Mock Market Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        450,
+        500
+      ],
+      "notes": "Connect 'Fetch NBBO Tick' here in production"
+    },
+    {
+      "parameters": {
+        "language": "python",
+        "pythonCode": "# CALCULATE SLIPPAGE\ntrade = items[0].json['body']\nmarket = items[1].json\n\n# 1. Calculate Midpoint (Fair Value)\nmidpoint = (market['bid'] + market['ask']) / 2\n\n# 2. Calculate Slippage (Difference)\n# If BUY, higher price is bad. If SELL, lower price is bad.\nif trade['side'] == 'BUY':\n    diff = trade['price'] - midpoint\nelse:\n    diff = midpoint - trade['price']\n\n# 3. Convert to Basis Points (1 bp = 0.01%)\n# Formula: (Diff / Price) * 10000\nslippage_bps = (diff / midpoint) * 10000\n\nreturn [{\n  \"json\": {\n    \"trade_id\": trade['trade_id'],\n    \"ticker\": trade['ticker'],\n    \"side\": trade['side'],\n    \"exec_price\": trade['price'],\n    \"market_midpoint\": midpoint,\n    \"slippage_bps\": round(slippage_bps, 2),\n    \"quality\": \"GOOD\" if slippage_bps < 2 else \"POOR\"\n  }\n}]"
+      },
+      "id": "tca-engine",
+      "name": "Calculate Slippage",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        700,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "schema": {
+          "__rl": true,
+          "value": "public",
+          "mode": "list",
+          "cachedResultName": "public"
+        },
+        "table": {
+          "__rl": true,
+          "value": "execution_quality_log",
+          "mode": "list",
+          "cachedResultName": "execution_quality_log"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": []
+        },
+        "options": {}
+      },
+      "id": "db-log",
+      "name": "Log to Database",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.2,
+      "position": [
+        950,
+        300
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_ID",
+          "name": "Postgres account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook (Trade Fill)": {
+      "main": [
+        [
+          {
+            "node": "Calculate Slippage",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mock Market Data": {
+      "main": [
+        [
+          {
+            "node": "Calculate Slippage",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Calculate Slippage": {
+      "main": [
+        [
+          {
+            "node": "Log to Database",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}
