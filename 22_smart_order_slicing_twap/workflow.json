@@ -1,0 +1,148 @@
+{
+  "name": "22_Smart_Order_Slicing_TWAP",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "twap_execution",
+        "options": {}
+      },
+      "id": "parent-order",
+      "name": "Webhook (Parent Order)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        200,
+        300
+      ],
+      "webhookId": "twap_endpoint",
+      "notes": "Payload: { \"ticker\": \"TSLA\", \"total_qty\": 1000, \"duration_mins\": 60, \"slices\": 10 }"
+    },
+    {
+      "parameters": {
+        "jsCode": "// SLICING LOGIC\nconst parent = items[0].json.body;\nconst slice_qty = Math.floor(parent.total_qty / parent.slices);\nconst delay_seconds = (parent.duration_mins * 60) / parent.slices;\n\nconst child_orders = [];\n\nfor (let i = 0; i < parent.slices; i++) {\n  child_orders.push({\n    json: {\n      child_id: i + 1,\n      ticker: parent.ticker,\n      qty: slice_qty,\n      delay_sec: delay_seconds,\n      is_last: i === parent.slices - 1\n    }\n  });\n}\n\nreturn child_orders;"
+      },
+      "id": "slicing-engine",
+      "name": "Generate Slices",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        450,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "id": "loop-slices",
+      "name": "SplitInBatches",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 1,
+      "position": [
+        700,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "amount": "={{ $json.delay_sec }}",
+        "unit": "seconds"
+      },
+      "id": "delay-timer",
+      "name": "Wait (Time Interval)",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1,
+      "position": [
+        950,
+        400
+      ],
+      "webhookId": "wait_trigger"
+    },
+    {
+      "parameters": {
+        "url": "https://api.broker.com/v1/orders",
+        "method": "POST",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "symbol",
+              "value": "={{ $json.ticker }}"
+            },
+            {
+              "name": "qty",
+              "value": "={{ $json.qty }}"
+            }
+          ]
+        }
+      },
+      "id": "submit-child",
+      "name": "Submit Child Order",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1200,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook (Parent Order)": {
+      "main": [
+        [
+          {
+            "node": "Generate Slices",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Slices": {
+      "main": [
+        [
+          {
+            "node": "SplitInBatches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SplitInBatches": {
+      "main": [
+        [
+          {
+            "node": "Submit Child Order",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Submit Child Order": {
+      "main": [
+        [
+          {
+            "node": "Wait (Time Interval)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait (Time Interval)": {
+      "main": [
+        [
+          {
+            "node": "SplitInBatches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}
