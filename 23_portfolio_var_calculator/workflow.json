@@ -1,0 +1,124 @@
+{
+  "name": "23_Portfolio_VaR_Calculator",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "45 15 * * 1-5"
+            }
+          ]
+        }
+      },
+      "id": "eod-trigger",
+      "name": "Market Close (3:45 PM)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [
+        200,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// MOCK PORTFOLIO DATA\n// In production, fetch from your SQL DB\nreturn [{\n  json: {\n    portfolio_value: 1000000, // ₹10 Lakhs\n    holdings: [\n      { ticker: \"INFY\", weight: 0.4, std_dev: 0.02 }, // 2% daily volatility\n      { ticker: \"RELIANCE\", weight: 0.4, std_dev: 0.015 },\n      { ticker: \"GOLDBEES\", weight: 0.2, std_dev: 0.008 }\n    ],\n    // Simplified Correlation Matrix (High correlation between stocks, low with gold)\n    correlations: {\n      \"INFY_RELIANCE\": 0.7,\n      \"INFY_GOLDBEES\": 0.1,\n      \"RELIANCE_GOLDBEES\": 0.1\n    }\n  }\n}];"
+      },
+      "id": "fetch-holdings",
+      "name": "Fetch Portfolio State",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        450,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "language": "python",
+        "pythonCode": "# VaR CALCULATION ENGINE\nimport math\n\ndata = items[0].json\nholdings = data['holdings']\ncorrelations = data['correlations']\ntotal_val = data['portfolio_value']\n\n# 1. Calculate Portfolio Variance (w1^2*s1^2 + w2^2*s2^2 + 2*w1*w2*s1*s2*corr...)\n# This is a simplified implementation of the Matrix Multiplication (w_T * Cov * w)\n\nvariance_sum = 0\n\n# Add individual variances\nfor asset in holdings:\n    variance_sum += (asset['weight'] ** 2) * (asset['std_dev'] ** 2)\n\n# Add covariance terms (Interaction risk)\n# Hardcoding the loop for the 3 assets demo logic\n# Term 1: INFY + RELIANCE\nw1, s1 = holdings[0]['weight'], holdings[0]['std_dev']\nw2, s2 = holdings[1]['weight'], holdings[1]['std_dev']\ncorr12 = correlations['INFY_RELIANCE']\nvariance_sum += 2 * w1 * w2 * s1 * s2 * corr12\n\n# Term 2: INFY + GOLD\nw3, s3 = holdings[2]['weight'], holdings[2]['std_dev']\ncorr13 = correlations['INFY_GOLDBEES']\nvariance_sum += 2 * w1 * w3 * s1 * s3 * corr13\n\n# Term 3: RELIANCE + GOLD\ncorr23 = correlations['RELIANCE_GOLDBEES']\nvariance_sum += 2 * w2 * w3 * s2 * s3 * corr23\n\n# 2. Portfolio Std Dev\nport_std_dev = math.sqrt(variance_sum)\n\n# 3. Calculate VaR (95% Confidence -> Z-Score = 1.65)\nz_score = 1.65\nvar_percent = port_std_dev * z_score\nvar_value = total_val * var_percent\n\nreturn [{\n  \"json\": {\n    \"portfolio_value\": total_val,\n    \"daily_volatility\": round(port_std_dev * 100, 2),\n    \"confidence_level\": \"95%\",\n    \"var_percent\": round(var_percent * 100, 2),\n    \"var_amount\": round(var_value, 2),\n    \"risk_status\": \"HIGH\" if var_percent > 0.02 else \"NORMAL\"\n  }\n}]"
+      },
+      "id": "var-engine",
+      "name": "Python Matrix Math",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        700,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "channel": "risk-management",
+        "text": "🛡️ *Daily VaR Report*",
+        "attachments": [
+          {
+            "color": "={{ $json.risk_status == 'NORMAL' ? '#36a64f' : '#ff0000' }}",
+            "fields": [
+              {
+                "title": "Value at Risk (95%)",
+                "value": "₹{{ $json.var_amount }} (-{{ $json.var_percent }}%)",
+                "short": true
+              },
+              {
+                "title": "Interpretation",
+                "value": "We are 95% confident that tomorrow's loss will not exceed ₹{{ $json.var_amount }}.",
+                "short": false
+              }
+            ]
+          }
+        ]
+      },
+      "id": "slack-alert",
+      "name": "Send Risk Report",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.1,
+      "position": [
+        950,
+        300
+      ],
+      "credentials": {
+        "slackApi": {
+          "id": "YOUR_SLACK_ID",
+          "name": "Slack account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Market Close (3:45 PM)": {
+      "main": [
+        [
+          {
+            "node": "Fetch Portfolio State",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Portfolio State": {
+      "main": [
+        [
+          {
+            "node": "Python Matrix Math",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Python Matrix Math": {
+      "main": [
+        [
+          {
+            "node": "Send Risk Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}
