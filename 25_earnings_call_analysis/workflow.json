@@ -1,0 +1,187 @@
+{
+  "name": "25_Earnings_Call_Audio_Analysis",
+  "nodes": [
+    {
+      "parameters": {
+        "parameters": [
+          {
+            "name": "audio_url",
+            "value": "https://ir.company.com/q3-earnings.mp3"
+          },
+          {
+            "name": "ticker",
+            "value": "TSLA"
+          }
+        ]
+      },
+      "id": "manual-trigger",
+      "name": "Manual Input (Audio URL)",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        200,
+        300
+      ],
+      "notes": "Enter the link to the MP3 file here"
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.audio_url }}",
+        "responseFormat": "file",
+        "options": {}
+      },
+      "id": "download-audio",
+      "name": "Download MP3",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        450,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "audio",
+        "operation": "transcribe",
+        "binaryPropertyName": "data",
+        "options": {
+          "language": "en"
+        }
+      },
+      "id": "whisper-transcribe",
+      "name": "OpenAI Whisper (Speech-to-Text)",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 1,
+      "position": [
+        700,
+        300
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "YOUR_OPENAI_ID",
+          "name": "OpenAI account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "gpt-4o",
+          "mode": "list",
+          "cachedResultName": "gpt-4o"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "ROLE: Behavioral Finance Analyst.\n\nTASK: Analyze this earnings call transcript for {{ $('Manual Input (Audio URL)').first().json.ticker }}.\n\nTRANSCRIPT:\n{{ $json.text }}\n\nDETECT:\n1. Hesitation: Does the CEO use filler words or dodge questions?\n2. Confidence: Is the tone definitive or vague?\n3. Red Flags: Specific negative admissions.\n\nOUTPUT JSON:\n{\n  \"ticker\": \"{{ $('Manual Input (Audio URL)').first().json.ticker }}\",\n  \"overall_sentiment\": \"Bullish/Bearish/Neutral\",\n  \"confidence_score\": (0-10),\n  \"red_flags\": [\"List specific quotes\"],\n  \"key_takeaways\": \"Summary\"\n}"
+            }
+          ]
+        },
+        "jsonOutput": true
+      },
+      "id": "ai-analysis",
+      "name": "GPT-4 Behavioral Analysis",
+      "type": "n8n-nodes-base.openAi",
+      "typeVersion": 1,
+      "position": [
+        950,
+        300
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "YOUR_OPENAI_ID",
+          "name": "OpenAI account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "channel": "earnings-intel",
+        "text": "🎙️ *Earnings Call Analysis: {{ $json.ticker }}*",
+        "attachments": [
+          {
+            "color": "={{ $json.confidence_score > 7 ? '#36a64f' : '#ff0000' }}",
+            "fields": [
+              {
+                "title": "Mgmt Confidence",
+                "value": "{{ $json.confidence_score }}/10",
+                "short": true
+              },
+              {
+                "title": "Sentiment",
+                "value": "{{ $json.overall_sentiment }}",
+                "short": true
+              },
+              {
+                "title": "🚩 Red Flags",
+                "value": "{{ $json.red_flags.join('\\n') }}",
+                "short": false
+              }
+            ]
+          }
+        ]
+      },
+      "id": "slack-report",
+      "name": "Send Report",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.1,
+      "position": [
+        1200,
+        300
+      ],
+      "credentials": {
+        "slackApi": {
+          "id": "YOUR_SLACK_ID",
+          "name": "Slack account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Manual Input (Audio URL)": {
+      "main": [
+        [
+          {
+            "node": "Download MP3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download MP3": {
+      "main": [
+        [
+          {
+            "node": "OpenAI Whisper (Speech-to-Text)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Whisper (Speech-to-Text)": {
+      "main": [
+        [
+          {
+            "node": "GPT-4 Behavioral Analysis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GPT-4 Behavioral Analysis": {
+      "main": [
+        [
+          {
+            "node": "Send Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}
