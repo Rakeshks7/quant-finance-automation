@@ -1,0 +1,185 @@
+{
+  "name": "24_Dynamic_Hedging_Beta",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 10-14 * * 1-5"
+            }
+          ]
+        }
+      },
+      "id": "hourly-trigger",
+      "name": "Hourly Monitor",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [
+        200,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// MOCK PORTFOLIO & MARKET DATA\n// Returns last 60d daily % returns for Portfolio and Benchmark (NIFTY)\nreturn [{\n  json: {\n    port_returns: [0.01, -0.005, 0.02, 0.005, -0.01], // ... (simulated)\n    mkt_returns: [0.005, -0.01, 0.015, -0.002, -0.02],\n    portfolio_value: 1000000,\n    nifty_contract_val: 100000 // Value of 1 Lot\n  }\n}];"
+      },
+      "id": "fetch-returns",
+      "name": "Fetch Return History",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        450,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "language": "python",
+        "pythonCode": "# CALCULATE BETA & HEDGE SIZE\nimport numpy as np\n\ndata = items[0].json\nport_ret = data['port_returns']\nmkt_ret = data['mkt_returns']\nport_val = data['portfolio_value']\nnifty_val = data['nifty_contract_val']\n\n# 1. Calculate Beta (Slope of regression)\n# In prod, ensure arrays are numpy arrays\n# beta = np.cov(port_ret, mkt_ret)[0, 1] / np.var(mkt_ret)\nbeta = 0.25 # Mock result: Portfolio is 25% correlated to market\n\n# 2. Config Target\ntarget_beta = 0.0\ntolerance = 0.1\n\n# 3. Calculate Drift\ndrift = beta - target_beta\n\nhedge_action = \"NONE\"\nhedge_qty = 0\n\nif abs(drift) > tolerance:\n    # Formula: Hedge Value = Portfolio Value * (Beta - Target Beta)\n    hedge_exposure_needed = port_val * drift \n    \n    # Calculate Lots (Negative drift means we need to BUY exposure, Positive means SELL)\n    # If drift is +0.25 (Too Long), we need to Short futures.\n    lots = round(hedge_exposure_needed / nifty_val)\n    \n    if lots != 0:\n        hedge_action = \"SELL_FUT\" if drift > 0 else \"BUY_FUT\"\n        hedge_qty = abs(lots)\n\nreturn [{\n  \"json\": {\n    \"current_beta\": beta,\n    \"target_beta\": target_beta,\n    \"drift\": drift,\n    \"action\": hedge_action,\n    \"quantity\": hedge_qty,\n    \"instrument\": \"NIFTY_FUT\"\n  }\n}]"
+      },
+      "id": "hedge-math",
+      "name": "Calc Hedge Requirements",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        700,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.action != 'NONE' }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "check-action",
+      "name": "Hedge Needed?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        950,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://api.broker.com/v1/orders",
+        "method": "POST",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "symbol",
+              "value": "={{ $json.instrument }}"
+            },
+            {
+              "name": "action",
+              "value": "={{ $json.action }}"
+            },
+            {
+              "name": "qty",
+              "value": "={{ $json.quantity }}"
+            }
+          ]
+        }
+      },
+      "id": "exec-hedge",
+      "name": "Execute Hedge",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1200,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "channel": "risk-management",
+        "text": "🛡️ *Auto-Hedge Executed*",
+        "attachments": [
+          {
+            "color": "#3366ff",
+            "fields": [
+              {
+                "title": "Drift Detected",
+                "value": "Beta drifted to {{ $json.current_beta }} (Target {{ $json.target_beta }})",
+                "short": false
+              },
+              {
+                "title": "Corrective Action",
+                "value": "{{ $json.action }} {{ $json.quantity }} Lots of {{ $json.instrument }}",
+                "short": false
+              }
+            ]
+          }
+        ]
+      },
+      "id": "alert-hedge",
+      "name": "Alert Team",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.1,
+      "position": [
+        1200,
+        500
+      ]
+    }
+  ],
+  "connections": {
+    "Hourly Monitor": {
+      "main": [
+        [
+          {
+            "node": "Fetch Return History",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Return History": {
+      "main": [
+        [
+          {
+            "node": "Calc Hedge Requirements",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calc Hedge Requirements": {
+      "main": [
+        [
+          {
+            "node": "Hedge Needed?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Hedge Needed?": {
+      "main": [
+        [
+          {
+            "node": "Execute Hedge",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Alert Team",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}
