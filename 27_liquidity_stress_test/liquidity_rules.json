@@ -1,0 +1,5 @@
+{
+  "max_participation_rate": 0.10,   // Never exceed 10% of Daily Volume
+  "illiquidity_penalty": 0.02,      // Assume 2% extra slippage if near limit
+  "min_daily_volume": 100000        // Don't touch stocks with < 100k volume
+}
