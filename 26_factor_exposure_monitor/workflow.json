@@ -1,0 +1,160 @@
+{
+  "name": "26_Factor_Exposure_Monitor",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 12 * * 1-5"
+            }
+          ]
+        }
+      },
+      "id": "midday-trigger",
+      "name": "Mid-Day (12:00 PM)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [
+        200,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// MOCK RETURN DATA\n// Returns last 90 days of % returns for Portfolio and Factors\n// In prod, calculate this from your DB and Polygon.io\nreturn [{\n  json: {\n    portfolio_returns: [0.01, 0.02, -0.01, 0.005, 0.03], // ... length 90\n    factor_returns: {\n      \"OIL_PRICE\": [0.008, 0.015, -0.005, 0.002, 0.025], // Correlated\n      \"INTEREST_RATES\": [-0.001, 0.002, 0.001, -0.001, 0.0] // Uncorrelated\n    },\n    config: {\n      \"OIL_PRICE\": 0.5,\n      \"INTEREST_RATES\": 0.3\n    }\n  }\n}];"
+      },
+      "id": "fetch-returns",
+      "name": "Fetch Return Series",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        450,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "language": "python",
+        "pythonCode": "# FACTOR REGRESSION ANALYSIS\nimport numpy as np\n\ndata = items[0].json\ny = data['portfolio_returns'] # Dependent Variable\nfactors = data['factor_returns']\nlimits = data['config']\n\nalerts = []\n\nfor factor_name, x in factors.items():\n    # 1. Run Linear Regression (Slope = Cov(x,y) / Var(x))\n    # Simulating numpy functionality\n    # beta = np.polyfit(x, y, 1)[0]\n    \n    # Mocking logic for demo based on input data hints\n    if factor_name == \"OIL_PRICE\":\n        beta = 0.65 # High correlation calculated\n    else:\n        beta = 0.05 # Low correlation\n        \n    threshold = limits.get(factor_name, 0.5)\n    \n    if beta > threshold:\n        alerts.append({\n            \"factor\": factor_name,\n            \"current_beta\": beta,\n            \"limit\": threshold,\n            \"severity\": \"HIGH\"\n        })\n\nreturn [{\n  \"json\": {\n    \"analysis_date\": datetime.now().strftime(\"%Y-%m-%d\"),\n    \"exposure_alerts\": alerts,\n    \"is_risk\": len(alerts) > 0\n  }\n}]"
+      },
+      "id": "regression-engine",
+      "name": "Run Regression (Python)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        700,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.is_risk }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "check-risk",
+      "name": "High Exposure?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        950,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "channel": "risk-management",
+        "text": "⚠️ *Hidden Factor Exposure Detected*",
+        "attachments": [
+          {
+            "color": "#ff9900",
+            "fields": [
+              {
+                "title": "Factor",
+                "value": "{{ $json.exposure_alerts[0].factor }}",
+                "short": true
+              },
+              {
+                "title": "Correlation (Beta)",
+                "value": "{{ $json.exposure_alerts[0].current_beta }} (Limit: {{ $json.exposure_alerts[0].limit }})",
+                "short": true
+              },
+              {
+                "title": "Interpretation",
+                "value": "Your portfolio is moving in sync with {{ $json.exposure_alerts[0].factor }}. Diversification is failing.",
+                "short": false
+              }
+            ]
+          }
+        ]
+      },
+      "id": "slack-alert",
+      "name": "Alert Risk Team",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.1,
+      "position": [
+        1200,
+        300
+      ],
+      "credentials": {
+        "slackApi": {
+          "id": "YOUR_SLACK_ID",
+          "name": "Slack account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Mid-Day (12:00 PM)": {
+      "main": [
+        [
+          {
+            "node": "Fetch Return Series",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Return Series": {
+      "main": [
+        [
+          {
+            "node": "Run Regression (Python)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run Regression (Python)": {
+      "main": [
+        [
+          {
+            "node": "High Exposure?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "High Exposure?": {
+      "main": [
+        [
+          {
+            "node": "Alert Risk Team",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}
