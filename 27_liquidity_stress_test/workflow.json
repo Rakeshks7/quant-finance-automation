@@ -1,0 +1,203 @@
+{
+  "name": "27_Liquidity_Stress_Test",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "check_liquidity",
+        "options": {}
+      },
+      "id": "trade-request",
+      "name": "Webhook (Trade Request)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        200,
+        300
+      ],
+      "webhookId": "liquidity_endpoint",
+      "notes": "Payload: { \"ticker\": \"SMALLCAP_X\", \"qty\": 50000, \"strategy\": \"Breakout\" }"
+    },
+    {
+      "parameters": {
+        "jsCode": "// MOCK MARKET DATA (ADV)\n// In production, fetch 'avgVolume' from Polygon/AlphaVantage\nreturn [{\n  json: {\n    ticker: \"SMALLCAP_X\",\n    avg_daily_volume: 200000, // 200k shares/day\n    last_price: 150.00\n  }\n}];"
+      },
+      "id": "fetch-adv",
+      "name": "Fetch ADV Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        450,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// LOAD RULES\nreturn [{ json: { max_participation_rate: 0.10 } }];"
+      },
+      "id": "load-rules",
+      "name": "Load Config",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        450,
+        500
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combinationMode": "mergeByPosition",
+        "options": {}
+      },
+      "id": "merge-data",
+      "name": "Merge Data",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 2,
+      "position": [
+        650,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// LIQUIDITY LOGIC\nconst order = $('Webhook (Trade Request)').first().json.body;\nconst market = $('Fetch ADV Data').first().json;\nconst rules = $('Load Config').first().json;\n\n// 1. Calc Participation Rate\nconst part_rate = order.qty / market.avg_daily_volume;\n\n// 2. Stress Test\nconst is_safe = part_rate <= rules.max_participation_rate;\n\n// 3. Calc Max Safe Qty (if unsafe)\nconst max_safe_qty = Math.floor(market.avg_daily_volume * rules.max_participation_rate);\n\nlet msg = \"Safe\";\nif (!is_safe) {\n  msg = `LIQUIDITY RISK: Order of ${order.qty} is ${(part_rate*100).toFixed(1)}% of ADV. Limit is ${(rules.max_participation_rate*100)}% (${max_safe_qty} shares).`;\n}\n\nreturn [{\n  json: {\n    ticker: order.ticker,\n    requested_qty: order.qty,\n    adv: market.avg_daily_volume,\n    part_rate_pct: (part_rate * 100).toFixed(2),\n    is_safe: is_safe,\n    max_safe_qty: max_safe_qty,\n    reason: msg\n  }\n}];"
+      },
+      "id": "stress-test",
+      "name": "Calc Liquidity Impact",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        850,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.is_safe }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "liquidity-gate",
+      "name": "Is Liquid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        1100,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "{\n  \"status\": \"APPROVED\",\n  \"qty\": {{ $json.requested_qty }}\n}",
+        "options": {}
+      },
+      "id": "approve-trade",
+      "name": "Respond: Approve",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        1350,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "{\n  \"status\": \"REJECTED_ILLIQUID\",\n  \"reason\": \"{{ $json.reason }}\",\n  \"suggested_qty\": {{ $json.max_safe_qty }}\n}",
+        "options": {
+          "responseCode": 400
+        }
+      },
+      "id": "reject-trade",
+      "name": "Respond: Reduce Size",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        1350,
+        400
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook (Trade Request)": {
+      "main": [
+        [
+          {
+            "node": "Merge Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch ADV Data": {
+      "main": [
+        [
+          {
+            "node": "Merge Data",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Load Config": {
+      "main": [
+        [
+          {
+            "node": "Merge Data",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Merge Data": {
+      "main": [
+        [
+          {
+            "node": "Calc Liquidity Impact",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calc Liquidity Impact": {
+      "main": [
+        [
+          {
+            "node": "Is Liquid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Liquid?": {
+      "main": [
+        [
+          {
+            "node": "Respond: Approve",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond: Reduce Size",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}
