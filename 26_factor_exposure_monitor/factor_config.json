@@ -1,0 +1,9 @@
+{
+  "factors_to_watch": [
+    { "name": "OIL_PRICE", "ticker": "USO", "threshold": 0.5 },
+    { "name": "TECH_SECTOR", "ticker": "XLK", "threshold": 0.6 },
+    { "name": "MOMENTUM", "ticker": "MTUM", "threshold": 0.4 },
+    { "name": "INTEREST_RATES", "ticker": "TLT", "threshold": 0.3 }
+  ],
+  "lookback_period_days": 90
+}
