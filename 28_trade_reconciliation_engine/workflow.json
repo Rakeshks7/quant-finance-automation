@@ -1,0 +1,208 @@
+{
+  "name": "28_Trade_Reconciliation_Recs",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "filters": {
+          "sender": "reports@broker.com",
+          "subject": "Daily Contract Note"
+        },
+        "downloadAttachments": true
+      },
+      "id": "gmail-trigger",
+      "name": "Gmail (Contract Note)",
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1,
+      "position": [
+        200,
+        300
+      ],
+      "credentials": {
+        "gmailApi": {
+          "id": "YOUR_GMAIL_ID",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// MOCK BROKER CSV PARSE\n// Simulating reading the CSV attachment from the email\nreturn [{\n  json: {\n    broker_trades: [\n      { ticker: \"AAPL\", side: \"BUY\", qty: 100, price: 150.05, fees: 1.50 },\n      { ticker: \"TSLA\", side: \"SELL\", qty: 50, price: 700.20, fees: 2.00 },\n      { ticker: \"MSFT\", side: \"BUY\", qty: 10, price: 300.00, fees: 0.50 } \n    ]\n  }\n}];"
+      },
+      "id": "parse-csv",
+      "name": "Parse Broker CSV",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        450,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT ticker, side, qty, exec_price as price FROM trade_ledger WHERE date(created_at) = CURRENT_DATE;"
+      },
+      "id": "fetch-internal",
+      "name": "Fetch Internal DB",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.2,
+      "position": [
+        450,
+        500
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_ID",
+          "name": "Postgres account"
+        }
+      },
+      "notes": "Internal Truth"
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combinationMode": "mergeByPosition",
+        "options": {}
+      },
+      "id": "merge-sources",
+      "name": "Merge Sources",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 2,
+      "position": [
+        650,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "language": "python",
+        "pythonCode": "# RECONCILIATION ENGINE\nbroker_data = items[0].json['broker_trades']\n# Mocking internal data for the demo if DB node is empty\ninternal_data = [\n    { \"ticker\": \"AAPL\", \"side\": \"BUY\", \"qty\": 100, \"price\": 150.05 }, # Match\n    { \"ticker\": \"TSLA\", \"side\": \"SELL\", \"qty\": 40, \"price\": 700.20 }, # QTY BREAK (40 vs 50)\n    { \"ticker\": \"GOOGL\", \"side\": \"BUY\", \"qty\": 5, \"price\": 2000.00 }  # MISSING IN BROKER\n]\n\nbreaks = []\n\n# Convert list to dict for faster lookup\nbroker_dict = {f\"{t['ticker']}_{t['side']}\": t for t in broker_data}\n\nfor trade in internal_data:\n    key = f\"{trade['ticker']}_{trade['side']}\"\n    \n    if key not in broker_dict:\n        breaks.append({\n            \"type\": \"MISSING_IN_BROKER\",\n            \"ticker\": trade['ticker'],\n            \"details\": \"Trade exists in DB but not in Contract Note\"\n        })\n        continue\n        \n    broker_trade = broker_dict[key]\n    \n    # Check Quantity\n    if trade['qty'] != broker_trade['qty']:\n        diff = trade['qty'] - broker_trade['qty']\n        breaks.append({\n            \"type\": \"QTY_BREAK\",\n            \"ticker\": trade['ticker'],\n            \"internal\": trade['qty'],\n            \"broker\": broker_trade['qty'],\n            \"diff\": diff\n        })\n        \n    # Check Price (Allow 0.01 tolerance)\n    if abs(trade['price'] - broker_trade['price']) > 0.01:\n        breaks.append({\n            \"type\": \"PRICE_BREAK\",\n            \"ticker\": trade['ticker'],\n            \"internal\": trade['price'],\n            \"broker\": broker_trade['price']\n        })\n\nreturn [{\n  \"json\": {\n    \"reconciliation_date\": datetime.now().strftime(\"%Y-%m-%d\"),\n    \"total_breaks\": len(breaks),\n    \"break_list\": breaks\n  }\n}]"
+      },
+      "id": "recs-engine",
+      "name": "Compare Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        850,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.total_breaks }}",
+              "value2": 0
+            }
+          ]
+        }
+      },
+      "id": "check-breaks",
+      "name": "Any Breaks?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        1100,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "toEmail": "ops@quant-fund.com",
+        "subject": "🔴 RECS BREAK: {{ $json.total_breaks }} Mismatches Found",
+        "text": "The following breaks were found between Internal DB and Broker Note:\n\n{{ JSON.stringify($json.break_list, null, 2) }}",
+        "html": "<h3>⚠️ Trade Reconciliation Failed</h3>\n<p>Please investigate the following discrepancies immediately:</p>\n<table border=\"1\">\n  <tr><th>Type</th><th>Ticker</th><th>Internal</th><th>Broker</th></tr>\n  {{ $json.break_list.map(b => `<tr><td>${b.type}</td><td>${b.ticker}</td><td>${b.internal || 'N/A'}</td><td>${b.broker || 'N/A'}</td></tr>`).join('') }}\n</table>"
+      },
+      "id": "email-ops",
+      "name": "Email Ops Team",
+      "type": "n8n-nodes-base.email",
+      "typeVersion": 2,
+      "position": [
+        1350,
+        400
+      ],
+      "credentials": {
+        "smtp": {
+          "id": "YOUR_SMTP_ID",
+          "name": "SMTP account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Gmail (Contract Note)": {
+      "main": [
+        [
+          {
+            "node": "Parse Broker CSV",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Broker CSV": {
+      "main": [
+        [
+          {
+            "node": "Merge Sources",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Internal DB": {
+      "main": [
+        [
+          {
+            "node": "Merge Sources",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge Sources": {
+      "main": [
+        [
+          {
+            "node": "Compare Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compare Data": {
+      "main": [
+        [
+          {
+            "node": "Any Breaks?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Any Breaks?": {
+      "main": [
+        [
+          {
+            "node": "Email Ops Team",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    }
+  }
+}
