@@ -1,0 +1,6 @@
+{
+  "target_asset": "LIQUIDBEES",
+  "min_cash_buffer": 50000,       // Always keep ₹50k in pure cash
+  "min_sweep_amount": 100000,     // Don't bother sweeping less than ₹1L
+  "approx_asset_price": 1000.00   // Price of 1 unit of Liquid Bees
+}
