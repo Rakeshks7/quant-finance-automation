@@ -1,0 +1,241 @@
+{
+  "name": "29_Cash_Management_Sweep",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "15 15 * * 1-5"
+            }
+          ]
+        }
+      },
+      "id": "eod-trigger",
+      "name": "Pre-Close (3:15 PM)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [
+        200,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://api.broker.com/v1/user/margins",
+        "options": {}
+      },
+      "id": "fetch-margin",
+      "name": "Get Free Margin",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        450,
+        200
+      ],
+      "notes": "Returns { \"available_cash\": 560000.00 }"
+    },
+    {
+      "parameters": {
+        "jsCode": "// MOCK CONFIG LOAD\nreturn [{ json: { target_asset: \"LIQUIDBEES\", min_cash_buffer: 50000, min_sweep_amount: 100000, asset_price: 1000 } }];"
+      },
+      "id": "load-config",
+      "name": "Load Treasury Rules",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        450,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combinationMode": "mergeByPosition",
+        "options": {}
+      },
+      "id": "merge-data",
+      "name": "Merge Context",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 2,
+      "position": [
+        650,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// SWEEP LOGIC\nconst margin = $('Get Free Margin').first().json;\nconst config = $('Load Treasury Rules').first().json;\n\nconst free_cash = margin.available_cash;\nconst investable_cash = free_cash - config.min_cash_buffer;\n\nlet action = \"SKIP\";\nlet qty = 0;\n\nif (investable_cash >= config.min_sweep_amount) {\n  qty = Math.floor(investable_cash / config.asset_price);\n  if (qty > 0) {\n    action = \"SWEEP\";\n  }\n}\n\nreturn [{\n  json: {\n    free_cash: free_cash,\n    investable: investable_cash,\n    action: action,\n    ticker: config.target_asset,\n    qty: qty,\n    estimated_value: qty * config.asset_price\n  }\n}];"
+      },
+      "id": "sweep-calc",
+      "name": "Calc Sweep Amount",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        850,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.action == 'SWEEP' }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "check-sweep",
+      "name": "Sweep Needed?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        1100,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://api.broker.com/v1/orders",
+        "method": "POST",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "symbol",
+              "value": "={{ $json.ticker }}"
+            },
+            {
+              "name": "qty",
+              "value": "={{ $json.qty }}"
+            },
+            {
+              "name": "type",
+              "value": "MARKET"
+            }
+          ]
+        }
+      },
+      "id": "exec-buy",
+      "name": "Buy Liquid Bees",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1350,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "channel": "treasury-ops",
+        "text": "💰 *Cash Sweep Executed*",
+        "attachments": [
+          {
+            "color": "#36a64f",
+            "fields": [
+              {
+                "title": "Amount Swept",
+                "value": "₹{{ $json.estimated_value }}",
+                "short": true
+              },
+              {
+                "title": "Instrument",
+                "value": "{{ $json.qty }} units of {{ $json.ticker }}",
+                "short": true
+              },
+              {
+                "title": "Remaining Buffer",
+                "value": "₹{{ $json.free_cash - $json.estimated_value }}",
+                "short": true
+              }
+            ]
+          }
+        ]
+      },
+      "id": "alert-treasury",
+      "name": "Alert Treasury",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.1,
+      "position": [
+        1350,
+        400
+      ]
+    }
+  ],
+  "connections": {
+    "Pre-Close (3:15 PM)": {
+      "main": [
+        [
+          {
+            "node": "Get Free Margin",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Free Margin": {
+      "main": [
+        [
+          {
+            "node": "Merge Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load Treasury Rules": {
+      "main": [
+        [
+          {
+            "node": "Merge Context",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge Context": {
+      "main": [
+        [
+          {
+            "node": "Calc Sweep Amount",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calc Sweep Amount": {
+      "main": [
+        [
+          {
+            "node": "Sweep Needed?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sweep Needed?": {
+      "main": [
+        [
+          {
+            "node": "Buy Liquid Bees",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Alert Treasury",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}
