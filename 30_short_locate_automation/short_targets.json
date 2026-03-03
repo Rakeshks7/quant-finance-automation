@@ -1,0 +1,4 @@
+{
+  "targets": ["TSLA", "NVDA", "GME", "AMC", "COIN"],
+  "max_borrow_fee_pct": 5.0  // Don't borrow if fee is > 5% annualized
+}
