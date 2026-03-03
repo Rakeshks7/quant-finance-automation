@@ -1,0 +1,32 @@
+{
+  "last_updated": "2026-01-08T08:30:00Z",
+  "approved_shorts": [
+    {
+      "ticker": "TSLA",
+      "available": true,
+      "borrow_fee_pct": 0.5,
+      "locate_id": "LOC_8821"
+    },
+    {
+      "ticker": "NVDA",
+      "available": true,
+      "borrow_fee_pct": 0.3,
+      "locate_id": "LOC_1192"
+    }
+  ],
+  "rejected_shorts": [
+    {
+      "ticker": "GME",
+      "available": true,
+      "borrow_fee_pct": 25.0,
+      "reason": "Fee Too High (25%)"
+    },
+    {
+      "ticker": "AMC",
+      "available": false,
+      "borrow_fee_pct": 0,
+      "reason": "Not Available"
+    }
+  ],
+  "count": 2
+}
