@@ -1,0 +1,163 @@
+{
+  "name": "30_Short_Locate_Automation",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "30 8 * * 1-5"
+            }
+          ]
+        }
+      },
+      "id": "pre-market-trigger",
+      "name": "Pre-Market (8:30 AM)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [
+        200,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// LOAD TARGETS\n// In prod, this might come from a DB or overnight analysis file\nreturn [{\n  json: {\n    targets: [\"TSLA\", \"NVDA\", \"GME\", \"AMC\", \"COIN\"],\n    max_fee: 5.0\n  }\n}];"
+      },
+      "id": "load-targets",
+      "name": "Load Short Targets",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        450,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// MOCK BROKER LOCATE API\n// Simulating responses for Hard-To-Borrow stocks\nconst targets = items[0].json.targets;\nconst responses = [];\n\ntargets.forEach(ticker => {\n  let available = true;\n  let fee = 0.5;\n  let locate_id = \"LOC_\" + Math.floor(Math.random() * 10000);\n\n  // Simulate Scenarios\n  if (ticker === \"GME\") { \n    available = true; \n    fee = 25.0; // Too expensive\n  }\n  if (ticker === \"AMC\") { \n    available = false; // No shares found\n  }\n\n  responses.push({\n    json: {\n      ticker: ticker,\n      available: available,\n      borrow_fee_pct: fee,\n      locate_id: available ? locate_id : null\n    }\n  });\n});\n\nreturn responses;"
+      },
+      "id": "broker-locate",
+      "name": "Request Locates",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        700,
+        300
+      ],
+      "notes": "Queries Broker for inventory"
+    },
+    {
+      "parameters": {
+        "language": "python",
+        "pythonCode": "# FILTER APPROVED SHORTS\ntargets = [item.json for item in items]\nmax_fee = 5.0 # Hardcoded limit or pass from previous node\n\napproved = []\nrejected = []\n\nfor t in targets:\n    if t['available'] and t['borrow_fee_pct'] <= max_fee:\n        approved.append(t)\n    else:\n        reason = \"Not Available\" if not t['available'] else f\"Fee Too High ({t['borrow_fee_pct']}%) \n        rejected.append({**t, \"reason\": reason})\n\nreturn [{\n  \"json\": {\n    \"approved_shorts\": approved,\n    \"rejected_shorts\": rejected,\n    \"count\": len(approved)\n  }\n}]"
+      },
+      "id": "filter-logic",
+      "name": "Filter Expensive Borrows",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        950,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "fileContent": "={{ JSON.stringify($json.approved_shorts, null, 2) }}",
+        "fileName": "/opt/quant-lab/available_shorts.json"
+      },
+      "id": "write-config",
+      "name": "Update Bot Config",
+      "type": "n8n-nodes-base.writeToFile",
+      "typeVersion": 1,
+      "position": [
+        1200,
+        200
+      ],
+      "notes": "Bots read this file"
+    },
+    {
+      "parameters": {
+        "channel": "trading-desk",
+        "text": "📉 *Short Locates Secured*",
+        "attachments": [
+          {
+            "color": "#36a64f",
+            "fields": [
+              {
+                "title": "Approved to Short",
+                "value": "{{ $json.approved_shorts.map(s => s.ticker).join(', ') }}",
+                "short": false
+              },
+              {
+                "title": "Rejected (HTB/Cost)",
+                "value": "{{ $json.rejected_shorts.map(s => s.ticker + ' (' + s.reason + ')').join('\\n') }}",
+                "short": false
+              }
+            ]
+          }
+        ]
+      },
+      "id": "slack-alert",
+      "name": "Alert Desk",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.1,
+      "position": [
+        1200,
+        400
+      ]
+    }
+  ],
+  "connections": {
+    "Pre-Market (8:30 AM)": {
+      "main": [
+        [
+          {
+            "node": "Load Short Targets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load Short Targets": {
+      "main": [
+        [
+          {
+            "node": "Request Locates",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Request Locates": {
+      "main": [
+        [
+          {
+            "node": "Filter Expensive Borrows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Expensive Borrows": {
+      "main": [
+        [
+          {
+            "node": "Update Bot Config",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Alert Desk",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}
