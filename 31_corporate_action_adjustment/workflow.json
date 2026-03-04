@@ -1,0 +1,164 @@
+{
+  "name": "31_Corporate_Action_Adjustment",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 6 * * 1-5"
+            }
+          ]
+        }
+      },
+      "id": "daily-trigger",
+      "name": "Daily Trigger (6:00 AM)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [
+        200,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://api.marketdata.com/v1/splits?date=today",
+        "options": {}
+      },
+      "id": "fetch-actions",
+      "name": "Get Corporate Actions",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        450,
+        300
+      ],
+      "notes": "Returns: [{ \"ticker\": \"TSLA\", \"ratio\": 0.333 (3-for-1), \"type\": \"SPLIT\" }]"
+    },
+    {
+      "parameters": {
+        "jsCode": "// MOCK API RESPONSE\nreturn [{\n  json: {\n    actions: [\n      { \"ticker\": \"NVDA\", \"ratio\": 0.1, \"type\": \"SPLIT\" }, // 10-for-1 Split\n      { \"ticker\": \"ITC\", \"amount\": 5.0, \"type\": \"DIVIDEND\" }\n    ]\n  }\n}];"
+      },
+      "id": "mock-actions",
+      "name": "Mock Actions",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        450,
+        500
+      ]
+    },
+    {
+      "parameters": {
+        "language": "python",
+        "pythonCode": "# GENERATE SQL PATCHES\nactions = items[0].json['actions']\nsql_queries = []\n\nfor action in actions:\n    ticker = action['ticker']\n    \n    if action['type'] == 'SPLIT':\n        # 1-for-10 split means Price / 10, Volume * 10\n        # Ratio 0.1 means new_price = old_price * 0.1\n        ratio = action['ratio']\n        query = f\"UPDATE price_history SET close = close * {ratio}, open = open * {ratio}, high = high * {ratio}, low = low * {ratio}, volume = volume / {ratio} WHERE ticker = '{ticker}';\"\n        sql_queries.append({\"ticker\": ticker, \"query\": query, \"reason\": \"SPLIT\"})\n        \n    elif action['type'] == 'DIVIDEND':\n        # Backward adjustment: Price - Dividend\n        amt = action['amount']\n        query = f\"UPDATE price_history SET close = close - {amt}, open = open - {amt}, high = high - {amt}, low = low - {amt} WHERE ticker = '{ticker}';\"\n        sql_queries.append({\"ticker\": ticker, \"query\": query, \"reason\": \"DIVIDEND\"})\n\nreturn [{\"json\": q} for q in sql_queries]"
+      },
+      "id": "sql-generator",
+      "name": "Generate SQL Fixes",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        700,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "={{ $json.query }}"
+      },
+      "id": "patch-db",
+      "name": "Patch Database",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.2,
+      "position": [
+        950,
+        300
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_ID",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "channel": "data-ops",
+        "text": "🛠️ *Historical Data Adjusted*",
+        "attachments": [
+          {
+            "color": "#3366ff",
+            "fields": [
+              {
+                "title": "Ticker",
+                "value": "{{ $json.ticker }}",
+                "short": true
+              },
+              {
+                "title": "Action",
+                "value": "{{ $json.reason }} Adjustment Applied",
+                "short": true
+              }
+            ]
+          }
+        ]
+      },
+      "id": "alert-ops",
+      "name": "Alert Data Ops",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.1,
+      "position": [
+        1200,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Daily Trigger (6:00 AM)": {
+      "main": [
+        [
+          {
+            "node": "Mock Actions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mock Actions": {
+      "main": [
+        [
+          {
+            "node": "Generate SQL Fixes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate SQL Fixes": {
+      "main": [
+        [
+          {
+            "node": "Patch Database",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Patch Database": {
+      "main": [
+        [
+          {
+            "node": "Alert Data Ops",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}
