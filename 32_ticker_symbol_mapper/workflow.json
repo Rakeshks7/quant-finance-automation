@@ -1,0 +1,189 @@
+{
+  "name": "32_Ticker_Symbol_Mapper",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 9 * * 6"
+            }
+          ]
+        }
+      },
+      "id": "weekly-trigger",
+      "name": "Weekly Trigger (Sat 9AM)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [
+        200,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://api.nasdaq.com/api/screener/stocks?tableonly=true&limit=25",
+        "options": {}
+      },
+      "id": "fetch-master",
+      "name": "Get Exchange Master",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        450,
+        200
+      ],
+      "notes": "Downloads official ticker list"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT current_ticker, isin FROM symbol_map;"
+      },
+      "id": "fetch-local",
+      "name": "Get Local Master",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.2,
+      "position": [
+        450,
+        400
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_ID",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combinationMode": "mergeByPosition",
+        "options": {}
+      },
+      "id": "merge-lists",
+      "name": "Merge Lists",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 2,
+      "position": [
+        650,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "language": "python",
+        "pythonCode": "# SYMBOL CHANGE DETECTOR\n# Logic: Match by ISIN (Unique ID). If Ticker changes, it's a rename.\n\nexchange_data = items[0].json['data']['rows'] # Mock structure\nlocal_data = items[1].json # From DB\n\nupdates = []\n\n# Create ISIN map for local DB\nlocal_map = {row['isin']: row['current_ticker'] for row in local_data}\n\nfor stock in exchange_data:\n    isin = stock.get('isin') # Assuming API provides ISIN\n    new_ticker = stock.get('symbol')\n    \n    if isin in local_map:\n        old_ticker = local_map[isin]\n        if old_ticker != new_ticker:\n            # DETECTED RENAME\n            updates.append({\n                \"current_ticker\": new_ticker,\n                \"previous_ticker\": old_ticker,\n                \"exchange\": \"NASDAQ\",\n                \"change_date\": datetime.now().strftime('%Y-%m-%d'),\n                \"type\": \"RENAME\"\n            })\n\nreturn [{\"json\": u} for u in updates]"
+      },
+      "id": "change-detector",
+      "name": "Detect Changes",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        850,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "schema": {
+          "__rl": true,
+          "value": "public",
+          "mode": "list",
+          "cachedResultName": "public"
+        },
+        "table": {
+          "__rl": true,
+          "value": "symbol_map",
+          "mode": "list",
+          "cachedResultName": "symbol_map"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": []
+        },
+        "options": {}
+      },
+      "id": "update-db",
+      "name": "Update Symbol Map",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.2,
+      "position": [
+        1100,
+        300
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_ID",
+          "name": "Postgres account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Weekly Trigger (Sat 9AM)": {
+      "main": [
+        [
+          {
+            "node": "Get Exchange Master",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get Local Master",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Exchange Master": {
+      "main": [
+        [
+          {
+            "node": "Merge Lists",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Local Master": {
+      "main": [
+        [
+          {
+            "node": "Merge Lists",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge Lists": {
+      "main": [
+        [
+          {
+            "node": "Detect Changes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Detect Changes": {
+      "main": [
+        [
+          {
+            "node": "Update Symbol Map",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}
