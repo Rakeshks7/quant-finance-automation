@@ -1,0 +1,13 @@
+{
+  "ticker": "DEFAULT",
+  "buckets": [
+    { "time": "09:15-09:30", "volume_pct": 0.15 }, // 15% of day's volume
+    { "time": "09:30-10:00", "volume_pct": 0.10 },
+    { "time": "10:00-11:00", "volume_pct": 0.15 },
+    { "time": "11:00-12:00", "volume_pct": 0.10 },
+    { "time": "12:00-13:00", "volume_pct": 0.05 }, // Lunch lull
+    { "time": "13:00-14:00", "volume_pct": 0.10 },
+    { "time": "14:00-15:00", "volume_pct": 0.15 },
+    { "time": "15:00-15:30", "volume_pct": 0.20 }  // Market Close rush
+  ]
+}
