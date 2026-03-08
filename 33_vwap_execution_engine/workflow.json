@@ -1,0 +1,175 @@
+{
+  "name": "33_VWAP_Execution_Engine",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "vwap_execution",
+        "options": {}
+      },
+      "id": "parent-order",
+      "name": "Webhook (Parent Order)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        200,
+        300
+      ],
+      "webhookId": "vwap_endpoint",
+      "notes": "Payload: { \"ticker\": \"ITC\", \"total_qty\": 10000 }"
+    },
+    {
+      "parameters": {
+        "jsCode": "// MOCK PROFILE LOAD\n// In prod, read from volume_profile.json or DB\nreturn [{\n  json: {\n    buckets: [\n      { \"id\": 1, \"duration_sec\": 900, \"pct\": 0.15 }, // 15 mins\n      { \"id\": 2, \"duration_sec\": 1800, \"pct\": 0.10 },\n      { \"id\": 3, \"duration_sec\": 3600, \"pct\": 0.05 }, // Lunch\n      { \"id\": 4, \"duration_sec\": 1800, \"pct\": 0.20 }  // Close\n    ]\n  }\n}];"
+      },
+      "id": "load-profile",
+      "name": "Load Volume Profile",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        450,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// VWAP SLICING LOGIC\nconst order = $('Webhook (Parent Order)').first().json.body;\nconst profile = $('Load Volume Profile').first().json.buckets;\n\nconst slices = [];\nlet total_allocated = 0;\n\nprofile.forEach(bucket => {\n  const slice_qty = Math.floor(order.total_qty * bucket.pct);\n  slices.push({\n    json: {\n      slice_id: bucket.id,\n      ticker: order.ticker,\n      qty: slice_qty,\n      wait_time: bucket.duration_sec,\n      timestamp: new Date().toISOString()\n    }\n  });\n  total_allocated += slice_qty;\n});\n\n// Add remainder to last slice if rounding issues\nif (total_allocated < order.total_qty) {\n  slices[slices.length - 1].json.qty += (order.total_qty - total_allocated);\n}\n\nreturn slices;"
+      },
+      "id": "vwap-slicer",
+      "name": "Generate Weighted Slices",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        700,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "id": "loop-slices",
+      "name": "SplitInBatches",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 1,
+      "position": [
+        950,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://api.broker.com/v1/orders",
+        "method": "POST",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "symbol",
+              "value": "={{ $json.ticker }}"
+            },
+            {
+              "name": "qty",
+              "value": "={{ $json.qty }}"
+            },
+            {
+              "name": "algo",
+              "value": "VWAP_CHILD"
+            }
+          ]
+        }
+      },
+      "id": "exec-slice",
+      "name": "Submit Child Order",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1200,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "amount": "={{ $json.wait_time }}",
+        "unit": "seconds"
+      },
+      "id": "wait-node",
+      "name": "Wait for Next Bucket",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1,
+      "position": [
+        1200,
+        500
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook (Parent Order)": {
+      "main": [
+        [
+          {
+            "node": "Load Volume Profile",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load Volume Profile": {
+      "main": [
+        [
+          {
+            "node": "Generate Weighted Slices",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Weighted Slices": {
+      "main": [
+        [
+          {
+            "node": "SplitInBatches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SplitInBatches": {
+      "main": [
+        [
+          {
+            "node": "Submit Child Order",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Submit Child Order": {
+      "main": [
+        [
+          {
+            "node": "Wait for Next Bucket",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait for Next Bucket": {
+      "main": [
+        [
+          {
+            "node": "SplitInBatches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}
