@@ -1,0 +1,190 @@
+{
+  "name": "34_Pairs_Trade_Sync",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "pairs_signal",
+        "options": {}
+      },
+      "id": "signal-trigger",
+      "name": "Webhook (Start Pair)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        200,
+        300
+      ],
+      "webhookId": "pairs_entry",
+      "notes": "Payload: { \"pair_id\": \"HDFC_ICICI\", \"leg1\": \"HDFCBANK\", \"leg1_side\": \"BUY\", \"leg1_qty\": 100, \"leg1_price\": 1500, \"leg2\": \"ICICIBANK\", \"leg2_side\": \"SELL\", \"leg2_qty\": 160 }"
+    },
+    {
+      "parameters": {
+        "url": "https://api.broker.com/v1/orders",
+        "method": "POST",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "symbol",
+              "value": "={{ $json.body.leg1 }}"
+            },
+            {
+              "name": "side",
+              "value": "={{ $json.body.leg1_side }}"
+            },
+            {
+              "name": "type",
+              "value": "LIMIT"
+            },
+            {
+              "name": "price",
+              "value": "={{ $json.body.leg1_price }}"
+            },
+            {
+              "name": "tag",
+              "value": "LEG_1_LEAD"
+            }
+          ]
+        }
+      },
+      "id": "exec-leg1",
+      "name": "Submit Leg 1 (Limit)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        450,
+        300
+      ],
+      "notes": "The Illiquid Asset"
+    },
+    {
+      "parameters": {
+        "webhookId": "leg1_fill_confirmation",
+        "options": {}
+      },
+      "id": "wait-for-fill",
+      "name": "Wait for Leg 1 Fill",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1,
+      "position": [
+        700,
+        300
+      ],
+      "webhookId": "leg1_fill_confirmation"
+    },
+    {
+      "parameters": {
+        "url": "https://api.broker.com/v1/orders",
+        "method": "POST",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "symbol",
+              "value": "={{ $('Webhook (Start Pair)').first().json.body.leg2 }}"
+            },
+            {
+              "name": "side",
+              "value": "={{ $('Webhook (Start Pair)').first().json.body.leg2_side }}"
+            },
+            {
+              "name": "type",
+              "value": "MARKET"
+            },
+            {
+              "name": "qty",
+              "value": "={{ $('Webhook (Start Pair)').first().json.body.leg2_qty }}"
+            }
+          ]
+        }
+      },
+      "id": "exec-leg2",
+      "name": "Submit Leg 2 (Market)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        950,
+        300
+      ],
+      "notes": "The Hedge (Immediate)"
+    },
+    {
+      "parameters": {
+        "channel": "algo-execution",
+        "text": "🔗 *Pairs Trade Synced*",
+        "attachments": [
+          {
+            "color": "#3366ff",
+            "fields": [
+              {
+                "title": "Pair",
+                "value": "{{ $('Webhook (Start Pair)').first().json.body.pair_id }}",
+                "short": true
+              },
+              {
+                "title": "Execution",
+                "value": "Leg 1 Filled (Limit) -> Leg 2 Filled (Market)",
+                "short": false
+              }
+            ]
+          }
+        ]
+      },
+      "id": "alert-execution",
+      "name": "Alert Team",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.1,
+      "position": [
+        1200,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook (Start Pair)": {
+      "main": [
+        [
+          {
+            "node": "Submit Leg 1 (Limit)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Submit Leg 1 (Limit)": {
+      "main": [
+        [
+          {
+            "node": "Wait for Leg 1 Fill",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait for Leg 1 Fill": {
+      "main": [
+        [
+          {
+            "node": "Submit Leg 2 (Market)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Submit Leg 2 (Market)": {
+      "main": [
+        [
+          {
+            "node": "Alert Team",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}
