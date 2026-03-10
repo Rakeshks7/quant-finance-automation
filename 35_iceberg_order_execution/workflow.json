@@ -1,0 +1,226 @@
+{
+  "name": "35_Iceberg_Order_Execution",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "iceberg_parent",
+        "options": {}
+      },
+      "id": "parent-trigger",
+      "name": "Webhook (Parent Order)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        200,
+        300
+      ],
+      "webhookId": "iceberg_entry",
+      "notes": "Payload: { \"ticker\": \"RELIANCE\", \"total_qty\": 5000, \"tip_size\": 100, \"limit_price\": 2400 }"
+    },
+    {
+      "parameters": {
+        "jsCode": "// INITIALIZE ICEBERG\nconst order = items[0].json.body;\nconst loops = Math.ceil(order.total_qty / order.tip_size);\n\n// Create an array to iterate over (simulating the 'Refill' process)\nconst batches = [];\nfor (let i = 0; i < loops; i++) {\n  batches.push({\n    json: {\n      batch_id: i + 1,\n      ticker: order.ticker,\n      qty: order.tip_size,\n      price: order.limit_price,\n      is_last: i === loops - 1\n    }\n  });\n}\n\nreturn batches;"
+      },
+      "id": "iceberg-engine",
+      "name": "Generate Tips",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        450,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "id": "loop-tips",
+      "name": "SplitInBatches",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 1,
+      "position": [
+        700,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://api.broker.com/v1/orders",
+        "method": "POST",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "symbol",
+              "value": "={{ $json.ticker }}"
+            },
+            {
+              "name": "qty",
+              "value": "={{ $json.qty }}"
+            },
+            {
+              "name": "price",
+              "value": "={{ $json.price }}"
+            },
+            {
+              "name": "type",
+              "value": "LIMIT"
+            }
+          ]
+        }
+      },
+      "id": "place-tip",
+      "name": "Place Tip Order",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        950,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "webhookId": "tip_fill_confirmation",
+        "options": {}
+      },
+      "id": "wait-for-fill",
+      "name": "Wait for Fill",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1,
+      "position": [
+        1200,
+        300
+      ],
+      "webhookId": "tip_fill_confirmation",
+      "notes": "Pauses here until broker confirms fill"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.is_last }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "check-done",
+      "name": "Is Finished?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        1450,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "channel": "trading-desk",
+        "text": "🧊 *Iceberg Order Complete*",
+        "attachments": [
+          {
+            "color": "#36a64f",
+            "fields": [
+              {
+                "title": "Ticker",
+                "value": "{{ $json.ticker }}",
+                "short": true
+              },
+              {
+                "title": "Total Executed",
+                "value": "All batches filled.",
+                "short": true
+              }
+            ]
+          }
+        ]
+      },
+      "id": "alert-done",
+      "name": "Alert Completion",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.1,
+      "position": [
+        1700,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook (Parent Order)": {
+      "main": [
+        [
+          {
+            "node": "Generate Tips",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Tips": {
+      "main": [
+        [
+          {
+            "node": "SplitInBatches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SplitInBatches": {
+      "main": [
+        [
+          {
+            "node": "Place Tip Order",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Place Tip Order": {
+      "main": [
+        [
+          {
+            "node": "Wait for Fill",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait for Fill": {
+      "main": [
+        [
+          {
+            "node": "Is Finished?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Finished?": {
+      "main": [
+        [
+          {
+            "node": "Alert Completion",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "SplitInBatches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}
