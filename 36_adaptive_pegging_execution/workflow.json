@@ -1,0 +1,340 @@
+{
+  "name": "36_Adaptive_Pegging_Execution",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "pegging_order",
+        "options": {}
+      },
+      "id": "order-trigger",
+      "name": "Webhook (Buy Signal)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        200,
+        300
+      ],
+      "webhookId": "peg_endpoint",
+      "notes": "Payload: { \"ticker\": \"TCS\", \"qty\": 100, \"hard_limit\": 3500 }"
+    },
+    {
+      "parameters": {
+        "url": "https://api.broker.com/v1/quote?symbol={{ $json.body.ticker }}",
+        "options": {}
+      },
+      "id": "get-quote",
+      "name": "Get Best Bid",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        450,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://api.broker.com/v1/orders",
+        "method": "POST",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "symbol",
+              "value": "={{ $('Webhook (Buy Signal)').first().json.body.ticker }}"
+            },
+            {
+              "name": "qty",
+              "value": "={{ $('Webhook (Buy Signal)').first().json.body.qty }}"
+            },
+            {
+              "name": "price",
+              "value": "={{ $json.bid_price }}"
+            },
+            {
+              "name": "type",
+              "value": "LIMIT"
+            }
+          ]
+        }
+      },
+      "id": "place-limit",
+      "name": "Place Limit Order",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        650,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "amount": 30,
+        "unit": "seconds"
+      },
+      "id": "wait-loop",
+      "name": "Wait 30s",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1,
+      "position": [
+        850,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://api.broker.com/v1/orders/{{ $json.order_id }}",
+        "options": {}
+      },
+      "id": "check-status",
+      "name": "Check Order Status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1050,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.status == 'FILLED' }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "is-filled",
+      "name": "Filled?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        1250,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://api.broker.com/v1/quote?symbol={{ $('Webhook (Buy Signal)').first().json.body.ticker }}",
+        "options": {}
+      },
+      "id": "recheck-quote",
+      "name": "Recheck Quote",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1250,
+        500
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// CHASE LOGIC\nconst old_order = $('Check Order Status').first().json;\nconst new_quote = $('Recheck Quote').first().json;\nconst hard_limit = $('Webhook (Buy Signal)').first().json.body.hard_limit;\n\nlet action = \"HOLD\"; // Do nothing if price hasn't moved\n\nif (new_quote.bid_price > old_order.price) {\n  // Market moved up, we are left behind\n  if (new_quote.bid_price <= hard_limit) {\n    action = \"CHASE\";\n  } else {\n    action = \"ABORT\"; // Too expensive\n  }\n}\n\nreturn [{ json: { action, new_price: new_quote.bid_price, old_id: old_order.id } }];"
+      },
+      "id": "calc-chase",
+      "name": "Calc Move",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1450,
+        500
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.action }}",
+              "value2": "CHASE"
+            }
+          ]
+        }
+      },
+      "id": "should-chase",
+      "name": "Should Chase?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        1650,
+        500
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://api.broker.com/v1/orders/{{ $json.old_id }}",
+        "method": "DELETE",
+        "options": {}
+      },
+      "id": "cancel-old",
+      "name": "Cancel Old",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1850,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://api.broker.com/v1/orders",
+        "method": "POST",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "symbol",
+              "value": "={{ $('Webhook (Buy Signal)').first().json.body.ticker }}"
+            },
+            {
+              "name": "qty",
+              "value": "={{ $('Webhook (Buy Signal)').first().json.body.qty }}"
+            },
+            {
+              "name": "price",
+              "value": "={{ $json.new_price }}"
+            },
+            {
+              "name": "type",
+              "value": "LIMIT"
+            }
+          ]
+        }
+      },
+      "id": "place-new",
+      "name": "Place New (Chase)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        2050,
+        400
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook (Buy Signal)": {
+      "main": [
+        [
+          {
+            "node": "Get Best Bid",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Best Bid": {
+      "main": [
+        [
+          {
+            "node": "Place Limit Order",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Place Limit Order": {
+      "main": [
+        [
+          {
+            "node": "Wait 30s",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait 30s": {
+      "main": [
+        [
+          {
+            "node": "Check Order Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Order Status": {
+      "main": [
+        [
+          {
+            "node": "Filled?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filled?": {
+      "main": [
+        null,
+        [
+          {
+            "node": "Recheck Quote",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Recheck Quote": {
+      "main": [
+        [
+          {
+            "node": "Calc Move",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calc Move": {
+      "main": [
+        [
+          {
+            "node": "Should Chase?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Should Chase?": {
+      "main": [
+        [
+          {
+            "node": "Cancel Old",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cancel Old": {
+      "main": [
+        [
+          {
+            "node": "Place New (Chase)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Place New (Chase)": {
+      "main": [
+        [
+          {
+            "node": "Wait 30s",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}
