@@ -1,0 +1,9 @@
+pandas==2.2.0
+numpy==1.26.3
+scipy==1.11.4
+statsmodels==0.14.1
+scikit-learn==1.4.0
+yfinance==0.2.36
+requests==2.31.0
+psycopg2-binary==2.9.9
+ta-lib==0.4.28
