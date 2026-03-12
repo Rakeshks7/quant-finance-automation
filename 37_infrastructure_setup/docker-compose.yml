@@ -1,0 +1,43 @@
+version: '3.8'
+
+services:
+  # 1. The Database (Stores your Trade Ledger, Recs, etc.)
+  postgres:
+    image: postgres:16
+    restart: always
+    environment:
+      - POSTGRES_USER=quant_user
+      - POSTGRES_PASSWORD=secure_password_123
+      - POSTGRES_DB=quant_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  # 2. The Automation Engine (Your Custom Image)
+  n8n:
+    build: .  # Builds using the Dockerfile in this folder
+    restart: always
+    ports:
+      - "5678:5678"
+    environment:
+      - N8N_BASIC_AUTH_ACTIVE=true
+      - N8N_BASIC_AUTH_USER=admin
+      - N8N_BASIC_AUTH_PASSWORD=admin
+      - DB_TYPE=postgresdb
+      - DB_POSTGRESDB_HOST=postgres
+      - DB_POSTGRESDB_PORT=5432
+      - DB_POSTGRESDB_DATABASE=quant_db
+      - DB_POSTGRESDB_USER=quant_user
+      - DB_POSTGRESDB_PASSWORD=secure_password_123
+      # CRITICAL: Allow n8n to use the Python we installed
+      - NODE_FUNCTION_ALLOW_EXTERNAL=moment,lodash
+      - N8N_RUNNERS_ENABLED=true
+    links:
+      - postgres
+    volumes:
+      - n8n_data:/home/node/.n8n
+
+volumes:
+  postgres_data:
+  n8n_data:
