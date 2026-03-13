@@ -1,0 +1,171 @@
+{
+  "name": "38_Venue_Analysis_SOR",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "sor_route",
+        "options": {}
+      },
+      "id": "trade-signal",
+      "name": "Webhook (Trade Signal)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        200,
+        300
+      ],
+      "webhookId": "sor_endpoint",
+      "notes": "Payload: { \"ticker\": \"RELIANCE\", \"qty\": 500, \"side\": \"BUY\" }"
+    },
+    {
+      "parameters": {
+        "url": "https://api.broker.com/v1/depth/NSE/{{ $json.body.ticker }}",
+        "options": {}
+      },
+      "id": "fetch-nse",
+      "name": "Get NSE Depth",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        450,
+        200
+      ],
+      "notes": "Returns Top 5 Bids/Asks"
+    },
+    {
+      "parameters": {
+        "url": "https://api.broker.com/v1/depth/BSE/{{ $json.body.ticker }}",
+        "options": {}
+      },
+      "id": "fetch-bse",
+      "name": "Get BSE Depth",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        450,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// MOCK DEPTH DATA\n// Simulating a scenario where prices are equal, but BSE has more liquidity\nreturn [\n  { json: { exchange: \"NSE\", best_ask: 2400.05, ask_qty: 200 } }, \n  { json: { exchange: \"BSE\", best_ask: 2400.05, ask_qty: 1000 } }\n];"
+      },
+      "id": "mock-depth",
+      "name": "Mock Market Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        650,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "language": "python",
+        "pythonCode": "# SOR LOGIC\n# Input: Array containing NSE data [0] and BSE data [1]\n\n# Accessing via items structure\nnse = items[0].json\nbse = items[1].json\n\n# Order Details (Hardcoded for demo, normally from Webhook)\norder_qty = 500\nside = \"BUY\"\n\nwinner = \"NSE\" # Default\nreason = \"Default\"\n\n# LOGIC 1: PRICE IMPROVEMENT\n# If Buying, we want lower Ask. If Selling, we want higher Bid.\nif nse['best_ask'] < bse['best_ask']:\n    winner = \"NSE\"\n    reason = \"Better Price\"\nelif bse['best_ask'] < nse['best_ask']:\n    winner = \"BSE\"\n    reason = \"Better Price\"\nelse:\n    # LOGIC 2: LIQUIDITY CHECK (Prices Equal)\n    # Can NSE fill the whole order?\n    nse_fillable = nse['ask_qty'] >= order_qty\n    bse_fillable = bse['ask_qty'] >= order_qty\n    \n    if nse_fillable and not bse_fillable:\n        winner = \"NSE\"\n        reason = \"Liquidity (Fillable)\"\n    elif bse_fillable and not nse_fillable:\n        winner = \"BSE\"\n        reason = \"Liquidity (Fillable)\"\n    else:\n        # Both can fill, or neither can. Choose deepest book.\n        if bse['ask_qty'] > nse['ask_qty']:\n            winner = \"BSE\"\n            reason = \"Greater Depth\"\n        else:\n            winner = \"NSE\"\n            reason = \"Greater Depth\"\n            \nreturn [{\n  \"json\": {\n    \"ticker\": \"RELIANCE\",\n    \"qty\": order_qty,\n    \"winning_exchange\": winner,\n    \"routing_reason\": reason,\n    \"nse_depth\": nse['ask_qty'],\n    \"bse_depth\": bse['ask_qty']\n  }\n}]"
+      },
+      "id": "sor-engine",
+      "name": "Determine Route",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        850,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://api.broker.com/v1/orders",
+        "method": "POST",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "symbol",
+              "value": "={{ $json.ticker }}"
+            },
+            {
+              "name": "exchange",
+              "value": "={{ $json.winning_exchange }}"
+            },
+            {
+              "name": "qty",
+              "value": "={{ $json.qty }}"
+            }
+          ]
+        }
+      },
+      "id": "exec-order",
+      "name": "Execute on Venue",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1100,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook (Trade Signal)": {
+      "main": [
+        [
+          {
+            "node": "Get NSE Depth",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get BSE Depth",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get NSE Depth": {
+      "main": [
+        [
+          {
+            "node": "Mock Market Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get BSE Depth": {
+      "main": [
+        [
+          {
+            "node": "Mock Market Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mock Market Data": {
+      "main": [
+        [
+          {
+            "node": "Determine Route",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Determine Route": {
+      "main": [
+        [
+          {
+            "node": "Execute on Venue",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}
