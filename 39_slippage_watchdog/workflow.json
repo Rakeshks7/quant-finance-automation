@@ -1,0 +1,180 @@
+{
+  "name": "39_Slippage_Watchdog",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 18 * * 1-5"
+            }
+          ]
+        }
+      },
+      "id": "daily-trigger",
+      "name": "Daily Trigger (6 PM)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [
+        200,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT algo_strategy, slippage_bps FROM execution_quality_log WHERE timestamp >= NOW() - INTERVAL '7 DAYS';"
+      },
+      "id": "fetch-db",
+      "name": "Fetch Weekly Logs",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.2,
+      "position": [
+        450,
+        200
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_ID",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// MOCK DATA GENERATOR\n// Simulating DB response if table is empty\nreturn [{\n  json: {\n    rows: [\n      // VWAP is performing poorly (High Slippage)\n      { algo_strategy: \"VWAP\", slippage_bps: 12.0 },\n      { algo_strategy: \"VWAP\", slippage_bps: 18.5 },\n      { algo_strategy: \"VWAP\", slippage_bps: 16.0 },\n      \n      // TWAP is doing okay\n      { algo_strategy: \"TWAP\", slippage_bps: 4.0 },\n      { algo_strategy: \"TWAP\", slippage_bps: 5.5 },\n      \n      // Pegging is doing great\n      { algo_strategy: \"PEGGING\", slippage_bps: -1.0 }, \n      { algo_strategy: \"PEGGING\", slippage_bps: 0.5 }\n    ]\n  }\n}];"
+      },
+      "id": "mock-data",
+      "name": "Mock Trade Logs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        450,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "language": "python",
+        "pythonCode": "# AGGREGATE PERFORMANCE\ntrades = items[0].json['rows']\n\n# Group by Algo\nstats = {}\nfor t in trades:\n    algo = t['algo_strategy']\n    slip = float(t['slippage_bps'])\n    \n    if algo not in stats:\n        stats[algo] = []\n    stats[algo].append(slip)\n\nreport = []\nfor algo, values in stats.items():\n    avg_slip = sum(values) / len(values)\n    count = len(values)\n    \n    status = \"NORMAL\"\n    if avg_slip > 15:\n        status = \"CRITICAL_FAIL\"\n    elif avg_slip > 8:\n        status = \"WARNING\"\n    elif avg_slip < 2:\n        status = \"EXCELLENT\"\n        \n    report.append({\n        \"algo\": algo,\n        \"avg_slippage_bps\": round(avg_slip, 2),\n        \"trade_count\": count,\n        \"status\": status\n    })\n\nreturn [{\"json\": r} for r in report]"
+      },
+      "id": "calc-stats",
+      "name": "Analyze Performance",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        700,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.status }}",
+              "value2": "CRITICAL_FAIL"
+            }
+          ]
+        }
+      },
+      "id": "filter-bad",
+      "name": "Identify Failures",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        950,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "channel": "algo-governance",
+        "text": "🚨 *Algo Performance Alert*",
+        "attachments": [
+          {
+            "color": "#ff0000",
+            "fields": [
+              {
+                "title": "Strategy",
+                "value": "{{ $json.algo }}",
+                "short": true
+              },
+              {
+                "title": "Avg Slippage",
+                "value": "{{ $json.avg_slippage_bps }} bps (Limit: 15)",
+                "short": true
+              },
+              {
+                "title": "Action Required",
+                "value": "Disable strategy and review parameters immediately.",
+                "short": false
+              }
+            ]
+          }
+        ]
+      },
+      "id": "alert-head-trader",
+      "name": "Alert Head Trader",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.1,
+      "position": [
+        1200,
+        300
+      ],
+      "credentials": {
+        "slackApi": {
+          "id": "YOUR_SLACK_ID",
+          "name": "Slack account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Daily Trigger (6 PM)": {
+      "main": [
+        [
+          {
+            "node": "Mock Trade Logs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mock Trade Logs": {
+      "main": [
+        [
+          {
+            "node": "Analyze Performance",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Analyze Performance": {
+      "main": [
+        [
+          {
+            "node": "Identify Failures",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Identify Failures": {
+      "main": [
+        [
+          {
+            "node": "Alert Head Trader",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}
