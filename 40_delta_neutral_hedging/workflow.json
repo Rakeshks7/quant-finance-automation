@@ -1,0 +1,189 @@
+{
+  "name": "40_Delta_Neutral_Hedging",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "*/5 9-15 * * 1-5"
+            }
+          ]
+        }
+      },
+      "id": "delta-monitor",
+      "name": "Market Monitor (5m)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [
+        200,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// MOCK OPTION PORTFOLIO\n// In prod, fetch from Broker API (GET /positions)\nreturn [{\n  json: {\n    positions: [\n      // Long Calls (Bullish Delta)\n      { symbol: \"NIFTY24000CE\", qty: 500, delta: 0.60 },\n      // Long Puts (Bearish Delta)\n      { symbol: \"NIFTY23500PE\", qty: 300, delta: -0.40 },\n      // Existing Hedge (Short Futures)\n      { symbol: \"NIFTY_FUT\", qty: -100, delta: 1.0 }\n    ],\n    config: {\n      hedge_tolerance: 50, // Don't hedge if delta is within +/- 50\n      future_delta: 1.0\n    }\n  }\n}];"
+      },
+      "id": "fetch-portfolio",
+      "name": "Fetch Greeks",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        450,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "language": "python",
+        "pythonCode": "# CALCULATE NET DELTA\ndata = items[0].json\npositions = data['positions']\ntolerance = data['config']['hedge_tolerance']\n\nnet_delta = 0\n\n# Summing Deltas\nfor pos in positions:\n    # Delta impact = Qty * Delta\n    # Note: Qty is positive for Long, negative for Short\n    impact = pos['qty'] * pos['delta']\n    net_delta += impact\n\n# Decision Logic\nhedge_action = \"NONE\"\nhedge_qty = 0\n\nif abs(net_delta) > tolerance:\n    # We need to neutralize. \n    # If Net Delta is +100, we need -100 adjustment (Sell Futures)\n    # If Net Delta is -100, we need +100 adjustment (Buy Futures)\n    \n    hedge_needed = -net_delta\n    \n    # Assuming 1 Future has Delta 1.0 * Lot Size (Here simplified to raw qty)\n    # In real world: Lots = hedge_needed / Lot_Size\n    \n    hedge_qty = round(abs(hedge_needed))\n    hedge_action = \"SELL\" if hedge_needed < 0 else \"BUY\"\n\nreturn [{\n  \"json\": {\n    \"net_portfolio_delta\": round(net_delta, 2),\n    \"tolerance\": tolerance,\n    \"is_imbalanced\": abs(net_delta) > tolerance,\n    \"action\": hedge_action,\n    \"hedge_instrument\": \"NIFTY_FUT\",\n    \"qty\": hedge_qty\n  }\n}]"
+      },
+      "id": "greek-engine",
+      "name": "Calc Delta Hedge",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        700,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.is_imbalanced }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "check-imbalance",
+      "name": "Hedge Needed?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        950,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://api.broker.com/v1/orders",
+        "method": "POST",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "symbol",
+              "value": "={{ $json.hedge_instrument }}"
+            },
+            {
+              "name": "side",
+              "value": "={{ $json.action }}"
+            },
+            {
+              "name": "qty",
+              "value": "={{ $json.qty }}"
+            },
+            {
+              "name": "type",
+              "value": "MARKET"
+            }
+          ]
+        }
+      },
+      "id": "exec-hedge",
+      "name": "Place Hedge Order",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1200,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "channel": "risk-desk",
+        "text": "⚖️ *Delta Neutral Rebalancing*",
+        "attachments": [
+          {
+            "color": "#3366ff",
+            "fields": [
+              {
+                "title": "Net Delta Exposure",
+                "value": "{{ $json.net_portfolio_delta }}",
+                "short": true
+              },
+              {
+                "title": "Hedge Executed",
+                "value": "{{ $json.action }} {{ $json.qty }} {{ $json.hedge_instrument }}",
+                "short": true
+              }
+            ]
+          }
+        ]
+      },
+      "id": "alert-risk",
+      "name": "Alert Risk Team",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.1,
+      "position": [
+        1200,
+        500
+      ]
+    }
+  ],
+  "connections": {
+    "Market Monitor (5m)": {
+      "main": [
+        [
+          {
+            "node": "Fetch Greeks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Greeks": {
+      "main": [
+        [
+          {
+            "node": "Calc Delta Hedge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calc Delta Hedge": {
+      "main": [
+        [
+          {
+            "node": "Hedge Needed?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Hedge Needed?": {
+      "main": [
+        [
+          {
+            "node": "Place Hedge Order",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Alert Risk Team",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}
