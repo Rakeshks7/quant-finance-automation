@@ -1,0 +1,183 @@
+{
+  "name": "41_Kelly_Criterion_Sizing",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "kelly_sizing",
+        "options": {}
+      },
+      "id": "signal-trigger",
+      "name": "Webhook (Signal)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        200,
+        300
+      ],
+      "webhookId": "kelly_endpoint",
+      "notes": "Payload: { \"strategy_name\": \"Trend_Follow_V1\", \"ticker\": \"TATAMOTORS\", \"current_price\": 800 }"
+    },
+    {
+      "parameters": {
+        "url": "https://api.broker.com/v1/user/profile",
+        "options": {}
+      },
+      "id": "get-balance",
+      "name": "Get Account Balance",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        450,
+        200
+      ],
+      "notes": "Returns { \"equity\": 1000000 }"
+    },
+    {
+      "parameters": {
+        "jsCode": "// MOCK STRATEGY STATS\n// In prod, fetch from your 'backtest_results' DB table\nreturn [{\n  json: {\n    strategy: \"Trend_Follow_V1\",\n    win_rate: 0.55,       // 55% Win Rate\n    avg_win: 5000,\n    avg_loss: 4000,\n    win_loss_ratio: 1.25, // 5000 / 4000\n    kelly_fraction: 0.5   // Use Half-Kelly for safety\n  }\n}];"
+      },
+      "id": "fetch-stats",
+      "name": "Fetch Strategy Stats",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        450,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combinationMode": "mergeByPosition",
+        "options": {}
+      },
+      "id": "merge-data",
+      "name": "Merge Data",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 2,
+      "position": [
+        650,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "language": "python",
+        "pythonCode": "# KELLY FORMULA CALCULATION\nimport math\n\nsignal = $('Webhook (Signal)').first().json.body\nbalance = $('Get Account Balance').first().json\nstats = $('Fetch Strategy Stats').first().json\n\np = stats['win_rate']\nb = stats['win_loss_ratio']\nfraction = stats['kelly_fraction']\n\n# 1. Calculate Full Kelly\n# f* = p - (q / b)  where q = 1 - p\nq = 1 - p\nfull_kelly = p - (q / b)\n\n# 2. Apply Safety Fraction (Half-Kelly)\nsafe_kelly = full_kelly * fraction\n\n# 3. Calculate Position Size ($)\n# If Kelly is negative (Strategy expects loss), Size = 0\nallocation_pct = max(0, safe_kelly)\nallocation_amt = balance['equity'] * allocation_pct\n\n# 4. Calculate Quantity\nqty = math.floor(allocation_amt / signal['current_price'])\n\nreturn [{\n  \"json\": {\n    \"strategy\": signal['strategy_name'],\n    \"full_kelly_pct\": round(full_kelly * 100, 2),\n    \"applied_kelly_pct\": round(allocation_pct * 100, 2),\n    \"capital_allocation\": round(allocation_amt, 2),\n    \"ticker\": signal['ticker'],\n    \"qty\": qty,\n    \"reason\": \"Optimal Growth Sizing\"\n  }\n}]"
+      },
+      "id": "kelly-engine",
+      "name": "Calc Kelly Size",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        850,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ $json.qty }}",
+              "operation": "larger",
+              "value2": 0
+            }
+          ]
+        }
+      },
+      "id": "check-valid",
+      "name": "Positive Size?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        1100,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "{\n  \"status\": \"SIZED\",\n  \"qty\": {{ $json.qty }},\n  \"allocation\": {{ $json.capital_allocation }}\n}",
+        "options": {}
+      },
+      "id": "return-size",
+      "name": "Return Qty",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        1350,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook (Signal)": {
+      "main": [
+        [
+          {
+            "node": "Merge Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Account Balance": {
+      "main": [
+        [
+          {
+            "node": "Merge Data",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Fetch Strategy Stats": {
+      "main": [
+        [
+          {
+            "node": "Merge Data",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Merge Data": {
+      "main": [
+        [
+          {
+            "node": "Calc Kelly Size",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calc Kelly Size": {
+      "main": [
+        [
+          {
+            "node": "Positive Size?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Positive Size?": {
+      "main": [
+        [
+          {
+            "node": "Return Qty",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}
