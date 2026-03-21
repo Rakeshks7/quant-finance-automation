@@ -1,0 +1,7 @@
+{
+  "risk_free_rate": 0.07,   // 7% (e.g., 10Y Govt Bond Yield)
+  "dividend_yield": 0.00,   // Assumed 0 for non-dividend paying indices
+  "target_assets": ["NIFTY", "BANKNIFTY"],
+  "hv_lookback_days": 30,   // To compare IV vs HV
+  "iv_percentile_threshold": 20 // Buy Vol if IV is in bottom 20%
+}
