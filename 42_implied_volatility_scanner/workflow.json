@@ -1,0 +1,174 @@
+{
+  "name": "42_Implied_Volatility_Scanner",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "*/15 9-15 * * 1-5"
+            }
+          ]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "Market Hours (15m)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [
+        200,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// MOCK OPTION CHAIN & MARKET DATA\n// In prod, fetch from Broker/Polygon API\nreturn [{\n  json: {\n    underlying: \"NIFTY\",\n    spot_price: 21500,\n    options: [\n      // ATM Call Option\n      { strike: 21500, type: \"call\", price: 180, days_to_expiry: 7 },\n      // OTM Call Option\n      { strike: 21600, type: \"call\", price: 120, days_to_expiry: 7 }\n    ],\n    historical_vol_30d: 0.12 // 12% HV\n  }\n}];"
+      },
+      "id": "fetch-chain",
+      "name": "Fetch Option Chain",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        450,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// LOAD CONFIG\nreturn [{ json: { risk_free_rate: 0.07, dividend_yield: 0.0 } }];"
+      },
+      "id": "load-config",
+      "name": "Load Market Params",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        450,
+        500
+      ],
+      "notes": "Reads market_params.json"
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combinationMode": "mergeByPosition",
+        "options": {}
+      },
+      "id": "merge-context",
+      "name": "Merge Context",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 2,
+      "position": [
+        650,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "language": "python",
+        "pythonCode": "# NEWTON-RAPHSON SOLVER FOR IMPLIED VOLATILITY\nimport math\nfrom scipy.stats import norm\n\ndata = items[0].json\nmarket_params = items[1].json\n\nS = data['spot_price']\nr = market_params['risk_free_rate']\nq = market_params['dividend_yield']\nhv = data['historical_vol_30d']\nresults = []\n\n# Black-Scholes Call Price Function\ndef bs_call_price(S, K, T, r, sigma):\n    d1 = (math.log(S / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * math.sqrt(T))\n    d2 = d1 - sigma * math.sqrt(T)\n    return S * norm.cdf(d1) - K * math.exp(-r * T) * norm.cdf(d2)\n\n# Vega Function (Derivative of Price w.r.t Sigma)\ndef bs_vega(S, K, T, r, sigma):\n    d1 = (math.log(S / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * math.sqrt(T))\n    return S * norm.pdf(d1) * math.sqrt(T)\n\n# Newton-Raphson Solver\ndef implied_vol(market_price, S, K, T, r):\n    sigma = 0.5 # Initial guess (50%)\n    for i in range(100): # Max 100 iterations\n        price = bs_call_price(S, K, T, r, sigma)\n        diff = market_price - price\n        if abs(diff) < 0.001:\n            return sigma\n        vega = bs_vega(S, K, T, r, sigma)\n        if vega == 0:\n            return None\n        sigma = sigma + diff / vega # The Newton Step\n    return sigma\n\nfor opt in data['options']:\n    K = opt['strike']\n    T = opt['days_to_expiry'] / 365.0\n    market_price = opt['price']\n    \n    iv = implied_vol(market_price, S, K, T, r)\n    \n    if iv:\n        status = \"CHEAP\" if iv < hv else \"EXPENSIVE\"\n        results.append({\n            \"strike\": K,\n            \"market_price\": market_price,\n            \"implied_vol\": round(iv * 100, 2),\n            \"historical_vol\": round(hv * 100, 2),\n            \"status\": status,\n            \"spread\": round((hv - iv) * 100, 2)\n        })\n\nreturn [{\"json\": {\"analysis\": results}}]"
+      },
+      "id": "iv-solver",
+      "name": "Newton-Raphson Solver",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        850,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "channel": "volatility-desk",
+        "text": "📊 *Implied Volatility Scan*",
+        "attachments": [
+          {
+            "color": "#3366ff",
+            "fields": [
+              {
+                "title": "ATM Strike",
+                "value": "{{ $json.analysis[0].strike }}",
+                "short": true
+              },
+              {
+                "title": "IV vs HV",
+                "value": "IV: {{ $json.analysis[0].implied_vol }}% | HV: {{ $json.analysis[0].historical_vol }}%",
+                "short": true
+              },
+              {
+                "title": "Signal",
+                "value": "{{ $json.analysis[0].status }} (Spread: {{ $json.analysis[0].spread }}%)",
+                "short": false
+              }
+            ]
+          }
+        ]
+      },
+      "id": "alert-vol",
+      "name": "Alert Vol Desk",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.1,
+      "position": [
+        1100,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Market Hours (15m)": {
+      "main": [
+        [
+          {
+            "node": "Fetch Option Chain",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Option Chain": {
+      "main": [
+        [
+          {
+            "node": "Merge Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load Market Params": {
+      "main": [
+        [
+          {
+            "node": "Merge Context",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge Context": {
+      "main": [
+        [
+          {
+            "node": "Newton-Raphson Solver",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Newton-Raphson Solver": {
+      "main": [
+        [
+          {
+            "node": "Alert Vol Desk",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}
