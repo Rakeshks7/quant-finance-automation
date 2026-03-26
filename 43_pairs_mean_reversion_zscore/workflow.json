@@ -1,0 +1,207 @@
+{
+  "name": "43_Pairs_Mean_Reversion_ZScore",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "pairs_tick",
+        "options": {}
+      },
+      "id": "tick-trigger",
+      "name": "Webhook (Tick)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        200,
+        300
+      ],
+      "webhookId": "zscore_endpoint",
+      "notes": "Payload: { \"hdfc\": 1500.0, \"kotak\": 1800.0 }"
+    },
+    {
+      "parameters": {
+        "jsCode": "// MOCK HISTORY LOAD\n// In prod, fetch last 30 spreads from Redis\nconst history = [];\nfor(let i=0; i<30; i++) {\n  // Simulating a stable spread around -660\n  history.push(-660 + (Math.random() * 10 - 5));\n}\nreturn [{ json: { history_spreads: history } }];"
+      },
+      "id": "fetch-history",
+      "name": "Get Rolling History",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        450,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// LOAD CONFIG\nreturn [{ json: { hedge_ratio: 1.2, z_entry: 2.0, z_exit: 0.0 } }];"
+      },
+      "id": "load-config",
+      "name": "Load Config",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        450,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combinationMode": "mergeByPosition",
+        "options": {}
+      },
+      "id": "merge-data",
+      "name": "Merge Context",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 2,
+      "position": [
+        650,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "language": "python",
+        "pythonCode": "# Z-SCORE CALCULATION\nimport numpy as np\n\ntick = $('Webhook (Tick)').first().json.body\nhistory = $('Get Rolling History').first().json['history_spreads']\nconfig = $('Load Config').first().json\n\n# 1. Calculate Current Spread\n# Spread = PriceA - (Ratio * PriceB)\ncurrent_spread = tick['hdfc'] - (config['hedge_ratio'] * tick['kotak'])\n\n# 2. Add to History & Calc Stats\n# (In real app, append to deque/list)\nall_spreads = history + [current_spread]\n\nmu = np.mean(all_spreads)\nsigma = np.std(all_spreads)\n\n# 3. Calculate Z-Score\nz_score = (current_spread - mu) / sigma\n\n# 4. Generate Signal\naction = \"HOLD\"\nif z_score > config['z_entry']:\n    action = \"SHORT_SPREAD\" # Sell A, Buy B\nelif z_score < -config['z_entry']:\n    action = \"LONG_SPREAD\"  # Buy A, Sell B\nelif abs(z_score) < 0.1: # Near zero\n    action = \"EXIT_ALL\"\n\nreturn [{\n  \"json\": {\n    \"current_spread\": round(current_spread, 2),\n    \"mean\": round(mu, 2),\n    \"std_dev\": round(sigma, 2),\n    \"z_score\": round(z_score, 2),\n    \"signal\": action\n  }\n}]"
+      },
+      "id": "zscore-engine",
+      "name": "Calc Z-Score",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        850,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.signal != 'HOLD' }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "check-signal",
+      "name": "Trade Signal?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        1100,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "channel": "pairs-bot",
+        "text": "⚡ *Z-Score Alert*",
+        "attachments": [
+          {
+            "color": "={{ $json.signal == 'EXIT_ALL' ? '#999999' : '#36a64f' }}",
+            "fields": [
+              {
+                "title": "Action",
+                "value": "{{ $json.signal }}",
+                "short": true
+              },
+              {
+                "title": "Z-Score",
+                "value": "{{ $json.z_score }} (Threshold: 2.0)",
+                "short": true
+              },
+              {
+                "title": "Spread Stats",
+                "value": "Curr: {{ $json.current_spread }} | Mean: {{ $json.mean }}",
+                "short": false
+              }
+            ]
+          }
+        ]
+      },
+      "id": "alert-trade",
+      "name": "Alert Execution",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.1,
+      "position": [
+        1350,
+        300
+      ],
+      "credentials": {
+        "slackApi": {
+          "id": "YOUR_SLACK_ID",
+          "name": "Slack account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook (Tick)": {
+      "main": [
+        [
+          {
+            "node": "Merge Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Rolling History": {
+      "main": [
+        [
+          {
+            "node": "Merge Context",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Load Config": {
+      "main": [
+        [
+          {
+            "node": "Merge Context",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Merge Context": {
+      "main": [
+        [
+          {
+            "node": "Calc Z-Score",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calc Z-Score": {
+      "main": [
+        [
+          {
+            "node": "Trade Signal?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Trade Signal?": {
+      "main": [
+        [
+          {
+            "node": "Alert Execution",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}
