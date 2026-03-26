@@ -1,0 +1,8 @@
+{
+  "stock_a": "HDFCBANK",
+  "stock_b": "KOTAKBANK",
+  "hedge_ratio": 1.2,       // Buy 1.2 shares of Kotak for every 1 HDFC (calculated via OLS)
+  "lookback_window": 30,    // Rolling window for Mean/StdDev (e.g., 30 ticks or days)
+  "z_entry_threshold": 2.0, // Enter if Z > 2 or Z < -2
+  "z_exit_threshold": 0.0   // Exit when Z returns to 0
+}
