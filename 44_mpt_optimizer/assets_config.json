@@ -1,0 +1,6 @@
+{
+  "tickers": ["AAPL", "MSFT", "GOOGL", "AMZN", "JPM", "JNJ", "PG", "NVDA"],
+  "min_weight": 0.0,
+  "max_weight": 0.25,      // No single asset > 25%
+  "target_annual_return": 0.15 // We want 15% return. Find the safest way to get it.
+}
