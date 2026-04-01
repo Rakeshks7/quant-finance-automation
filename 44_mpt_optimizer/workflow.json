@@ -1,0 +1,129 @@
+{
+  "name": "44_MPT_Optimizer",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 0 1 * *"
+            }
+          ]
+        }
+      },
+      "id": "monthly-trigger",
+      "name": "Monthly Trigger (1st)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [
+        200,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// MOCK MARKET DATA\n// In prod, use yfinance to fetch 1 year of daily closes for all tickers\nreturn [{\n  json: {\n    tickers: [\"AAPL\", \"MSFT\", \"GOOGL\", \"JNJ\"],\n    // Expected Annual Returns (Mean)\n    expected_returns: [0.20, 0.18, 0.15, 0.08],\n    // Covariance Matrix (Risk Interaction)\n    cov_matrix: [\n      [0.04, 0.02, 0.02, 0.005],\n      [0.02, 0.03, 0.02, 0.005],\n      [0.02, 0.02, 0.05, 0.005],\n      [0.005, 0.005, 0.005, 0.01]\n    ],\n    constraints: {\n      target_return: 0.12,\n      max_weight: 0.50\n    }\n  }\n}];"
+      },
+      "id": "fetch-data",
+      "name": "Fetch Hist Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        450,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "language": "python",
+        "pythonCode": "# MPT OPTIMIZATION ENGINE\nimport numpy as np\nfrom scipy.optimize import minimize\n\ndata = items[0].json\nmu = np.array(data['expected_returns'])\nS = np.array(data['cov_matrix'])\ntickers = data['tickers']\ntarget_ret = data['constraints']['target_return']\nmax_w = data['constraints']['max_weight']\nnum_assets = len(tickers)\n\n# 1. Define Objective Function: Minimize Variance (Risk)\ndef portfolio_variance(weights):\n    return weights.T @ S @ weights\n\n# 2. Define Constraints\n# Sum of weights = 1\ncons = [{'type': 'eq', 'fun': lambda x: np.sum(x) - 1}]\n# Expected Return = Target\ncons.append({'type': 'eq', 'fun': lambda x: x.T @ mu - target_ret})\n\n# 3. Define Bounds (0 <= w <= max_weight)\nbounds = tuple((0, max_w) for _ in range(num_assets))\n\n# 4. Initial Guess (Equal weights)\ninit_guess = num_assets * [1. / num_assets,]\n\n# 5. Run Optimizer\nresult = minimize(portfolio_variance, init_guess, method='SLSQP', bounds=bounds, constraints=cons)\n\n# 6. Format Output\noptimal_weights = result.x\nallocation = {}\nfor i, ticker in enumerate(tickers):\n    allocation[ticker] = round(optimal_weights[i] * 100, 2)\n\nreturn [{\n  \"json\": {\n    \"success\": result.success,\n    \"optimized_variance\": round(result.fun, 4),\n    \"target_return\": target_ret * 100,\n    \"allocation\": allocation\n  }\n}]"
+      },
+      "id": "optimizer-engine",
+      "name": "Scipy Optimizer",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        700,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "channel": "portfolio-manager",
+        "text": "🧠 *Portfolio Optimization Complete*",
+        "attachments": [
+          {
+            "color": "#3366ff",
+            "fields": [
+              {
+                "title": "Goal",
+                "value": "Min Risk for {{ $json.target_return }}% Return",
+                "short": true
+              },
+              {
+                "title": "Risk (Variance)",
+                "value": "{{ $json.optimized_variance }}",
+                "short": true
+              },
+              {
+                "title": "Optimal Weights",
+                "value": "{{ JSON.stringify($json.allocation, null, 1).replace('{','').replace('}','').replace(/\"/g,'') }}",
+                "short": false
+              }
+            ]
+          }
+        ]
+      },
+      "id": "alert-pm",
+      "name": "Alert PM",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.1,
+      "position": [
+        950,
+        300
+      ],
+      "credentials": {
+        "slackApi": {
+          "id": "YOUR_SLACK_ID",
+          "name": "Slack account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Monthly Trigger (1st)": {
+      "main": [
+        [
+          {
+            "node": "Fetch Hist Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Hist Data": {
+      "main": [
+        [
+          {
+            "node": "Scipy Optimizer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Scipy Optimizer": {
+      "main": [
+        [
+          {
+            "node": "Alert PM",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}
