@@ -1,0 +1,13 @@
+{
+  "indices": [
+    "NIFTY_AUTO",
+    "NIFTY_IT",
+    "NIFTY_PHARMA",
+    "NIFTY_BANK",
+    "NIFTY_METAL",
+    "NIFTY_FMCG"
+  ],
+  "lookback_long": 120,   // 6 Months (approx trading days)
+  "lookback_short": 20,   // 1 Month
+  "top_n": 2              // Buy the Top 2
+}
