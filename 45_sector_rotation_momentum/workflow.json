@@ -1,0 +1,123 @@
+{
+  "name": "45_Sector_Rotation_Momentum",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 15 * * 5"
+            }
+          ]
+        }
+      },
+      "id": "weekly-trigger",
+      "name": "Friday Trigger (3 PM)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [
+        200,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// MOCK INDEX DATA\n// Returns last close and historical closes for calculation\nreturn [{\n  json: {\n    data: {\n      \"NIFTY_AUTO\": { current: 18000, t_20: 17500, t_120: 15000 },\n      \"NIFTY_IT\": { current: 35000, t_20: 36000, t_120: 34000 },\n      \"NIFTY_PHARMA\": { current: 16000, t_20: 15800, t_120: 13000 },\n      \"NIFTY_BANK\": { current: 48000, t_20: 46000, t_120: 42000 },\n      \"NIFTY_METAL\": { current: 6000, t_20: 6200, t_120: 6500 },\n      \"NIFTY_FMCG\": { current: 54000, t_20: 53000, t_120: 51000 }\n    },\n    config: {\n      top_n: 2\n    }\n  }\n}];"
+      },
+      "id": "fetch-indices",
+      "name": "Fetch Index Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        450,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "language": "python",
+        "pythonCode": "# CALCULATE RELATIVE STRENGTH SCORES\nindices = items[0].json['data']\ntop_n = items[0].json['config']['top_n']\n\nscores = []\n\nfor name, prices in indices.items():\n    curr = prices['current']\n    p20 = prices['t_20']\n    p120 = prices['t_120']\n    \n    # Calculate Rate of Change (%)\n    roc_short = ((curr - p20) / p20) * 100\n    roc_long = ((curr - p120) / p120) * 100\n    \n    # Weighted Momentum Score (70% Long Term, 30% Short Term)\n    total_score = (0.7 * roc_long) + (0.3 * roc_short)\n    \n    scores.append({\n        \"sector\": name,\n        \"score\": round(total_score, 2),\n        \"roc_120\": round(roc_long, 2),\n        \"roc_20\": round(roc_short, 2)\n    })\n\n# Rank Descending\nscores.sort(key=lambda x: x['score'], reverse=True)\n\ntop_sectors = scores[:top_n]\nbottom_sectors = scores[-top_n:]\n\nreturn [{\n  \"json\": {\n    \"ranking\": scores,\n    \"buy_recommendation\": [s['sector'] for s in top_sectors],\n    \"sell_recommendation\": [s['sector'] for s in bottom_sectors],\n    \"top_score\": top_sectors[0]['score'],\n    \"bottom_score\": bottom_sectors[-1]['score']\n  }\n}]"
+      },
+      "id": "momentum-ranker",
+      "name": "Rank Sectors",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        700,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "channel": "strategy-committee",
+        "text": "🔄 *Weekly Sector Rotation Update*",
+        "attachments": [
+          {
+            "color": "#36a64f",
+            "fields": [
+              {
+                "title": "Strongest Sectors (BUY)",
+                "value": "{{ $json.buy_recommendation.join(', ') }}",
+                "short": true
+              },
+              {
+                "title": "Weakest Sectors (SELL)",
+                "value": "{{ $json.sell_recommendation.join(', ') }}",
+                "short": true
+              },
+              {
+                "title": "Leaderboard",
+                "value": "{{ $json.ranking.map(s => s.sector + ': ' + s.score).join('\\n') }}",
+                "short": false
+              }
+            ]
+          }
+        ]
+      },
+      "id": "alert-rotation",
+      "name": "Alert Rotation",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.1,
+      "position": [
+        950,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Friday Trigger (3 PM)": {
+      "main": [
+        [
+          {
+            "node": "Fetch Index Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Index Data": {
+      "main": [
+        [
+          {
+            "node": "Rank Sectors",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Rank Sectors": {
+      "main": [
+        [
+          {
+            "node": "Alert Rotation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}
