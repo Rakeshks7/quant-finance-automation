@@ -1,0 +1,5 @@
+{
+  "assets": ["NIFTY_ETF", "GOLD_ETF", "GSEC_10Y_ETF"],
+  "vol_lookback_days": 60,   // Calculate volatility over last 2 months
+  "target_risk_contribution": "EQUAL" // Each asset should contribute 33.3% of total risk
+}
