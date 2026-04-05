@@ -1,0 +1,115 @@
+{
+  "name": "46_Risk_Parity_Allocator",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "risk_parity_trigger",
+        "options": {}
+      },
+      "id": "vix-trigger",
+      "name": "Webhook (VIX Spike)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        200,
+        300
+      ],
+      "webhookId": "risk_parity_endpoint",
+      "notes": "Payload: { \"vix_level\": 22.5 }"
+    },
+    {
+      "parameters": {
+        "jsCode": "// MOCK VOLATILITY DATA (Annualized)\n// In prod, calculate StdDev of daily returns * sqrt(252)\nreturn [{\n  json: {\n    assets: {\n      \"NIFTY_ETF\": 0.18,  // 18% Volatility (High Risk)\n      \"GOLD_ETF\": 0.12,   // 12% Volatility (Medium Risk)\n      \"GSEC_10Y_ETF\": 0.04 // 4% Volatility (Low Risk)\n    }\n  }\n}];"
+      },
+      "id": "fetch-vol",
+      "name": "Fetch Asset Volatility",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        450,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "language": "python",
+        "pythonCode": "# CALCULATE RISK PARITY WEIGHTS\n# Simple Inverse Volatility Weighting method\n\ndata = items[0].json['assets']\n\n# 1. Calculate Inverse Volatility (1 / sigma)\ninv_vols = {}\ntotal_inv_vol = 0\n\nfor asset, vol in data.items():\n    if vol == 0: vol = 0.001 # Prevent divide by zero\n    inv = 1 / vol\n    inv_vols[asset] = inv\n    total_inv_vol += inv\n\n# 2. Calculate Weights\nweights = {}\nrisk_contribution = {}\n\nfor asset, inv in inv_vols.items():\n    # Weight = (1/sigma) / Sum(1/sigma)\n    w = inv / total_inv_vol\n    weights[asset] = round(w * 100, 2)\n    \n    # Verify Risk Contribution (Weight * Vol should be roughly equal)\n    # Note: True Risk Parity uses Covariance, this is 'Naive' Risk Parity\n    risk_contribution[asset] = round(w * data[asset] * 100, 2)\n\nreturn [{\n  \"json\": {\n    \"vix_trigger\": True,\n    \"optimal_weights\": weights,\n    \"risk_metrics\": risk_contribution,\n    \"interpretation\": \"High volatility assets (Nifty) got lower weight. Stable assets (Bonds) got higher weight.\"\n  }\n}]"
+      },
+      "id": "parity-engine",
+      "name": "Calc Parity Weights",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        700,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "channel": "risk-committee",
+        "text": "⚖️ *Risk Parity Rebalance*",
+        "attachments": [
+          {
+            "color": "#3366ff",
+            "fields": [
+              {
+                "title": "Trigger",
+                "value": "VIX Spike detected",
+                "short": true
+              },
+              {
+                "title": "New Allocation",
+                "value": "{{ JSON.stringify($json.optimal_weights, null, 1).replace('{','').replace('}','').replace(/\"/g,'') }}",
+                "short": false
+              }
+            ]
+          }
+        ]
+      },
+      "id": "alert-rebalance",
+      "name": "Alert Rebalance",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.1,
+      "position": [
+        950,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook (VIX Spike)": {
+      "main": [
+        [
+          {
+            "node": "Fetch Asset Volatility",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Asset Volatility": {
+      "main": [
+        [
+          {
+            "node": "Calc Parity Weights",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calc Parity Weights": {
+      "main": [
+        [
+          {
+            "node": "Alert Rebalance",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}
