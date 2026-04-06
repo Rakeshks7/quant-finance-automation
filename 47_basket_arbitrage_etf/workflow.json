@@ -1,0 +1,177 @@
+{
+  "name": "47_Basket_Arbitrage_ETF",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "etf_tick",
+        "options": {}
+      },
+      "id": "tick-trigger",
+      "name": "Webhook (Tick)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        200,
+        300
+      ],
+      "webhookId": "basket_arb_endpoint",
+      "notes": "Payload: { \"NIFTYBEES\": 251.50, \"HDFCBANK\": 1600, \"RELIANCE\": 2400, ... }"
+    },
+    {
+      "parameters": {
+        "jsCode": "// LOAD BASKET CONFIG\nreturn [{\n  json: {\n    etf_ticker: \"NIFTYBEES\",\n    divisor: 1000, // Scaling factor for demo\n    constituents: [\n      { ticker: \"HDFCBANK\", weight: 0.135 },\n      { ticker: \"RELIANCE\", weight: 0.102 },\n      { ticker: \"ICICIBANK\", weight: 0.078 }\n      // ... Assuming these represent the full index for the demo\n    ],\n    threshold_pct: 0.25\n  }\n}];"
+      },
+      "id": "load-weights",
+      "name": "Load Weights",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        450,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combinationMode": "mergeByPosition",
+        "options": {}
+      },
+      "id": "merge-data",
+      "name": "Merge Context",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 2,
+      "position": [
+        650,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "language": "python",
+        "pythonCode": "# NAV CALCULATOR\nprices = $('Webhook (Tick)').first().json.body\nconfig = $('Load Weights').first().json\n\n# 1. Calculate Implied NAV\n# NAV = Sum(Price * Weight) * ScalingFactor\n# Note: In real life, calculation is: (Sum of Mkt Caps / Divisor)\n\nweighted_sum = 0\nfor stock in config['constituents']:\n    ticker = stock['ticker']\n    if ticker in prices:\n        weighted_sum += prices[ticker] * stock['weight']\n\n# Simulating the scaling to match ETF price (approx ₹250)\ntheoretical_nav = weighted_sum * 0.55 # Arbitrary scalar for demo math\n\netf_price = prices[config['etf_ticker']]\n\n# 2. Calculate Spread\ndiff = etf_price - theoretical_nav\npremium_pct = (diff / theoretical_nav) * 100\n\n# 3. Generate Signal\naction = \"NO_ARB\"\nif premium_pct > config['threshold_pct']:\n    action = \"SELL_ETF_BUY_BASKET\" # ETF is Expensive\nelif premium_pct < -config['threshold_pct']:\n    action = \"BUY_ETF_SELL_BASKET\" # ETF is Cheap\n\nreturn [{\n  \"json\": {\n    \"etf_price\": etf_price,\n    \"theoretical_nav\": round(theoretical_nav, 2),\n    \"premium_pct\": round(premium_pct, 4),\n    \"signal\": action,\n    \"threshold\": config['threshold_pct']\n  }\n}]"
+      },
+      "id": "arb-engine",
+      "name": "Calc NAV Spread",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        850,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.signal != 'NO_ARB' }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "check-signal",
+      "name": "Arb Opportunity?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        1100,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "channel": "hft-desk",
+        "text": "⚡ *Basket Arbitrage Detected*",
+        "attachments": [
+          {
+            "color": "#ff9900",
+            "fields": [
+              {
+                "title": "Strategy",
+                "value": "{{ $json.signal }}",
+                "short": true
+              },
+              {
+                "title": "Spread",
+                "value": "{{ $json.premium_pct }}% (Threshold: {{ $json.threshold }}%)",
+                "short": true
+              },
+              {
+                "title": "Prices",
+                "value": "ETF: {{ $json.etf_price }} | NAV: {{ $json.theoretical_nav }}",
+                "short": false
+              }
+            ]
+          }
+        ]
+      },
+      "id": "alert-arb",
+      "name": "Alert Desk",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.1,
+      "position": [
+        1350,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook (Tick)": {
+      "main": [
+        [
+          {
+            "node": "Merge Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load Weights": {
+      "main": [
+        [
+          {
+            "node": "Merge Context",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge Context": {
+      "main": [
+        [
+          {
+            "node": "Calc NAV Spread",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calc NAV Spread": {
+      "main": [
+        [
+          {
+            "node": "Arb Opportunity?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Arb Opportunity?": {
+      "main": [
+        [
+          {
+            "node": "Alert Desk",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}
