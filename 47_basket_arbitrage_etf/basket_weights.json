@@ -1,0 +1,13 @@
+{
+  "etf_ticker": "NIFTYBEES",
+  "index_divisor": 100, // Adjusts the raw sum to the ETF price scale
+  "constituents": [
+    { "ticker": "HDFCBANK", "weight": 0.135 },
+    { "ticker": "RELIANCE", "weight": 0.102 },
+    { "ticker": "ICICIBANK", "weight": 0.078 },
+    { "ticker": "INFY", "weight": 0.056 },
+    { "ticker": "ITC", "weight": 0.045 }
+    // ... In prod, include all 50 stocks
+  ],
+  "arb_threshold_pct": 0.25 // Act if price deviates > 0.25% from NAV
+}
