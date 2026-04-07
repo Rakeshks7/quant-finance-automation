@@ -1,0 +1,169 @@
+{
+  "name": "48_Yield_Curve_Monitor",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "30 16 * * 1-5"
+            }
+          ]
+        }
+      },
+      "id": "daily-trigger",
+      "name": "Daily Close",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [
+        200,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// MOCK YIELD DATA\n// In prod, use yfinance or FRED API\nreturn [{\n  json: {\n    date: \"2025-10-15\",\n    us10y: 3.85, // 3.85%\n    us02y: 4.10  // 4.10% (Higher than 10Y!)\n  }\n}];"
+      },
+      "id": "fetch-yields",
+      "name": "Get Treasury Yields",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        450,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combinationMode": "mergeByPosition",
+        "options": {}
+      },
+      "id": "merge-data",
+      "name": "Merge Config",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 2,
+      "position": [
+        650,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "language": "python",
+        "pythonCode": "# CALCULATE YIELD SPREAD\ndata = items[0].json\n\nten_year = data['us10y']\ntwo_year = data['us02y']\n\n# The Recession Indicator\nspread = ten_year - two_year\n\nstatus = \"NORMAL\"\nif spread < 0:\n    status = \"INVERTED\"\nelif spread < 0.2:\n    status = \"FLAT\"\n    \nreturn [{\n  \"json\": {\n    \"date\": data['date'],\n    \"10y_yield\": ten_year,\n    \"2y_yield\": two_year,\n    \"spread_bps\": round(spread * 100, 2), # In Basis Points\n    \"curve_shape\": status,\n    \"is_recession_signal\": spread < 0\n  }\n}]"
+      },
+      "id": "macro-engine",
+      "name": "Calc Spread",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        850,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.is_recession_signal }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "check-signal",
+      "name": "Recession Signal?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        1100,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "channel": "macro-strategy",
+        "text": "🚨 *Recession Warning Triggered*",
+        "attachments": [
+          {
+            "color": "#ff0000",
+            "fields": [
+              {
+                "title": "Yield Curve State",
+                "value": "INVERTED ({{ $json.spread_bps }} bps)",
+                "short": true
+              },
+              {
+                "title": "Data",
+                "value": "10Y: {{ $json.10y_yield }}% | 2Y: {{ $json.2y_yield }}%",
+                "short": true
+              },
+              {
+                "title": "Recommended Action",
+                "value": "Rotate Equity -> Defensive (Gold/Bonds/Cash).",
+                "short": false
+              }
+            ]
+          }
+        ]
+      },
+      "id": "alert-macro",
+      "name": "Alert Committee",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.1,
+      "position": [
+        1350,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Daily Close": {
+      "main": [
+        [
+          {
+            "node": "Get Treasury Yields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Treasury Yields": {
+      "main": [
+        [
+          {
+            "node": "Calc Spread",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calc Spread": {
+      "main": [
+        [
+          {
+            "node": "Recession Signal?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Recession Signal?": {
+      "main": [
+        [
+          {
+            "node": "Alert Committee",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}
