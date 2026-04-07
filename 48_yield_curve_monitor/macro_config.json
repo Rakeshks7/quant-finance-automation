@@ -1,0 +1,6 @@
+{
+  "long_bond_ticker": "^TNX",   // 10-Year Treasury Yield
+  "short_bond_ticker": "^IRX",  // 13-Week/2-Year Treasury Yield (Symbol varies by data source)
+  "inversion_threshold": 0.0,   // Spread < 0 is the danger zone
+  "confirmation_days": 3        // Must stay inverted for 3 days to avoid false alarm
+}
