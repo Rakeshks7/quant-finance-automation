@@ -1,0 +1,5 @@
+{
+  "assets": ["NIFTY", "BANKNIFTY", "GOLD", "US_TECH", "CRUDE_OIL", "HDFCBANK", "INFY", "ITC", "TCS", "RELIANCE"],
+  "clusters": 3,          // Force the algorithm to find 3 distinct groups
+  "lookback_days": 90     // Analyze behavior over the last quarter
+}
