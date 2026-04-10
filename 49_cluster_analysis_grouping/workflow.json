@@ -1,0 +1,128 @@
+{
+  "name": "49_Cluster_Analysis_Grouping",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 0 1 * *"
+            }
+          ]
+        }
+      },
+      "id": "monthly-trigger",
+      "name": "Monthly Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [
+        200,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// MOCK RETURN MATRIX\n// In prod, use pandas to pivot SQL price data into a matrix\nreturn [{\n  json: {\n    features: [\n      // Hypothetical correlation features (Volatility, Beta, Daily Return)\n      { ticker: \"GOLD\", vector: [0.01, 0.05, 0.02] },\n      { ticker: \"SILVER\", vector: [0.012, 0.06, 0.025] }, // Similar to Gold\n      \n      { ticker: \"INFY\", vector: [0.05, 0.15, 0.08] },\n      { ticker: \"TCS\", vector: [0.048, 0.14, 0.075] },    // Similar to Infy\n      \n      { ticker: \"RELIANCE\", vector: [0.03, 0.10, 0.05] }, // Its own thing?\n      { ticker: \"NIFTY\", vector: [0.035, 0.11, 0.055] }   // Similar to Reliance\n    ],\n    config: {\n      n_clusters: 3\n    }\n  }\n}];"
+      },
+      "id": "fetch-data",
+      "name": "Fetch Asset Features",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        450,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "language": "python",
+        "pythonCode": "# K-MEANS CLUSTERING ENGINE\nfrom sklearn.cluster import KMeans\nimport numpy as np\n\ndata = items[0].json['features']\nn_clusters = items[0].json['config']['n_clusters']\n\n# 1. Prepare Data Matrix\ntickers = [d['ticker'] for d in data]\nX = np.array([d['vector'] for d in data])\n\n# 2. Run Algorithm\nkmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)\nkmeans.fit(X)\nlabels = kmeans.labels_\n\n# 3. Group Results\nclusters = {}\nfor i in range(n_clusters):\n    clusters[f\"Cluster_{i+1}\"] = []\n\nfor ticker, label in zip(tickers, labels):\n    clusters[f\"Cluster_{label+1}\"].append(ticker)\n\n# 4. Generate Insight\n# Check correlation of Gold (Safety) vs Tech (Risk)\ninsight = \"Normal\"\nrisk_assets = [\"INFY\", \"TCS\"]\nsafe_assets = [\"GOLD\", \"SILVER\"]\n\n# Find which cluster Gold is in\ngold_cluster = next((k for k, v in clusters.items() if \"GOLD\" in v), None)\ntech_cluster = next((k for k, v in clusters.items() if \"INFY\" in v), None)\n\nif gold_cluster == tech_cluster:\n    insight = \"WARNING: Gold is trading like a Tech stock (Correlation Breakdown).\"\n\nreturn [{\n  \"json\": {\n    \"cluster_map\": clusters,\n    \"insight\": insight,\n    \"total_assets\": len(tickers)\n  }\n}]"
+      },
+      "id": "ml-engine",
+      "name": "Run K-Means",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        700,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "channel": "quant-research",
+        "text": "🧬 *Asset Cluster Analysis (ML)*",
+        "attachments": [
+          {
+            "color": "#7B1FA2",
+            "fields": [
+              {
+                "title": "Cluster 1 (Defensive?)",
+                "value": "{{ $json.cluster_map.Cluster_1.join(', ') }}",
+                "short": false
+              },
+              {
+                "title": "Cluster 2 (Growth?)",
+                "value": "{{ $json.cluster_map.Cluster_2.join(', ') }}",
+                "short": false
+              },
+              {
+                "title": "Cluster 3 (Market?)",
+                "value": "{{ $json.cluster_map.Cluster_3.join(', ') }}",
+                "short": false
+              },
+              {
+                "title": "AI Insight",
+                "value": "{{ $json.insight }}",
+                "short": false
+              }
+            ]
+          }
+        ]
+      },
+      "id": "alert-research",
+      "name": "Alert Research",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.1,
+      "position": [
+        950,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Monthly Trigger": {
+      "main": [
+        [
+          {
+            "node": "Fetch Asset Features",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Asset Features": {
+      "main": [
+        [
+          {
+            "node": "Run K-Means",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run K-Means": {
+      "main": [
+        [
+          {
+            "node": "Alert Research",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}
