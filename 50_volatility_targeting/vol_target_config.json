@@ -1,0 +1,5 @@
+{
+  "target_volatility": 0.12,  // 12% Annualized Volatility
+  "max_leverage": 1.5,        // Don't borrow more than 50% extra
+  "rebalance_threshold": 0.10 // Only trade if leverage needs to change by 10%
+}
