@@ -1,0 +1,204 @@
+{
+  "name": "50_Volatility_Targeting",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 17 * * 1-5"
+            }
+          ]
+        }
+      },
+      "id": "daily-trigger",
+      "name": "Daily Trigger (5 PM)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [
+        200,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// MOCK NAV HISTORY\n// In prod, fetch daily NAV from your 'account_ledger' table\nreturn [{\n  json: {\n    // Simulate a volatile period (Returns jumping +/- 2%)\n    returns_series: [0.01, -0.015, 0.02, -0.02, 0.01, -0.018, 0.022, -0.005, 0.015],\n    current_leverage: 1.0 // We are currently 100% invested\n  }\n}];"
+      },
+      "id": "fetch-returns",
+      "name": "Fetch Portfolio NAV",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        450,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// LOAD CONFIG\nreturn [{ json: { target_vol: 0.12, max_lev: 1.5, threshold: 0.10 } }];"
+      },
+      "id": "load-config",
+      "name": "Load Risk Config",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        450,
+        500
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combinationMode": "mergeByPosition",
+        "options": {}
+      },
+      "id": "merge-data",
+      "name": "Merge Context",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 2,
+      "position": [
+        650,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "language": "python",
+        "pythonCode": "# CALCULATE VOLATILITY SCALAR\nimport numpy as np\n\nreturns = items[0].json['returns_series']\ncurr_lev = items[0].json['current_leverage']\nconfig = items[1].json\n\n# 1. Calc Annualized Volatility\n# StdDev * Sqrt(252)\ndaily_vol = np.std(returns)\nannual_vol = daily_vol * np.sqrt(252)\n\n# 2. Calc Target Leverage\n# Scalar = Target / Current\n# If Vol is 24% and Target is 12%, Scalar = 0.5\nraw_scalar = config['target_vol'] / annual_vol\n\n# 3. Cap Leverage (Safety)\ntarget_lev = min(raw_scalar, config['max_lev'])\n\n# 4. Check Change Threshold\n# Only trade if change is > 10% to save fees\nchange_pct = abs(target_lev - curr_lev) / curr_lev\naction = \"HOLD\"\n\nif change_pct > config['threshold']:\n    if target_lev < curr_lev:\n        action = \"DELEVERAGE (SELL)\"\n    else:\n        action = \"LEVERAGE_UP (BUY)\"\n\nreturn [{\n  \"json\": {\n    \"current_vol_annual\": round(annual_vol * 100, 2),\n    \"target_vol\": round(config['target_vol'] * 100, 2),\n    \"current_leverage\": curr_lev,\n    \"new_target_leverage\": round(target_lev, 2),\n    \"action\": action\n  }\n}]"
+      },
+      "id": "vol-engine",
+      "name": "Calc Vol Scalar",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        850,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.action != 'HOLD' }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "check-rebalance",
+      "name": "Rebalance Needed?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        1100,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "channel": "risk-desk",
+        "text": "🛡️ *Volatility Control Triggered*",
+        "attachments": [
+          {
+            "color": "={{ $json.action.includes('SELL') ? '#ff0000' : '#36a64f' }}",
+            "fields": [
+              {
+                "title": "Market Regime",
+                "value": "Current Vol: {{ $json.current_vol_annual }}% (Target: {{ $json.target_vol }}%)",
+                "short": true
+              },
+              {
+                "title": "Action",
+                "value": "{{ $json.action }}",
+                "short": true
+              },
+              {
+                "title": "Exposure Adjustment",
+                "value": "Leverage: {{ $json.current_leverage }}x → {{ $json.new_target_leverage }}x",
+                "short": false
+              }
+            ]
+          }
+        ]
+      },
+      "id": "alert-risk",
+      "name": "Alert Risk Desk",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.1,
+      "position": [
+        1350,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Daily Trigger (5 PM)": {
+      "main": [
+        [
+          {
+            "node": "Fetch Portfolio NAV",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Portfolio NAV": {
+      "main": [
+        [
+          {
+            "node": "Merge Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load Risk Config": {
+      "main": [
+        [
+          {
+            "node": "Merge Context",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge Context": {
+      "main": [
+        [
+          {
+            "node": "Calc Vol Scalar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calc Vol Scalar": {
+      "main": [
+        [
+          {
+            "node": "Rebalance Needed?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Rebalance Needed?": {
+      "main": [
+        [
+          {
+            "node": "Alert Risk Desk",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}
