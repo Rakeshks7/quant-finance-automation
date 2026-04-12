@@ -1,0 +1,12 @@
+{
+  "assets": [
+    "NIFTY_FUT",      // Equities
+    "GOLD_FUT",       // Precious Metals
+    "CRUDEOIL_FUT",   // Energy
+    "COPPER_FUT",     // Industrial Metals
+    "USDINR_FUT",     // Currencies
+    "GSEC_10Y"        // Rates
+  ],
+  "trend_filter": 200,   // 200-Day Moving Average
+  "use_ema": true        // Use Exponential (EMA) instead of Simple (SMA)
+}
