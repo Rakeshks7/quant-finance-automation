@@ -1,0 +1,204 @@
+{
+  "name": "51_Trend_Following_CTA",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 16 * * 5"
+            }
+          ]
+        }
+      },
+      "id": "weekly-trigger",
+      "name": "Friday Close",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [
+        200,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// MOCK PRICE HISTORY\n// In prod, use yfinance/database to get 300 days of closes\nreturn [{\n  json: {\n    data: {\n      \"NIFTY_FUT\": { current: 21500, history: [/* ... 299 days ... */ 21000] },\n      \"GOLD_FUT\": { current: 62000, history: [/* ... */ 58000] },\n      \"CRUDEOIL_FUT\": { current: 6000, history: [/* ... */ 6500] } // Downtrend example\n    },\n    config: {\n      period: 200\n    }\n  }\n}];"
+      },
+      "id": "fetch-history",
+      "name": "Fetch OHLCV",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        450,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "language": "python",
+        "pythonCode": "# CALCULATE TREND DIRECTION\nimport pandas as pd\nimport numpy as np\n\ndata = items[0].json['data']\nperiod = items[0].json['config']['period']\n\nsignals = []\n\nfor ticker, values in data.items():\n    # Simulate history generation for demo (since we don't have 300 real points here)\n    # In prod: closes = pd.Series(values['history'])\n    \n    # Mocking the EMA calculation result for demonstration\n    current_price = values['current']\n    \n    # Example logic: \n    # Nifty & Gold are above average (Bullish)\n    # Crude is below average (Bearish)\n    if ticker == \"CRUDEOIL_FUT\":\n        ema_200 = 6400\n    elif ticker == \"NIFTY_FUT\":\n        ema_200 = 19500\n    else:\n        ema_200 = 59000\n        \n    # Determine Trend\n    trend = \"NEUTRAL\"\n    if current_price > ema_200:\n        trend = \"LONG\"\n        strength = (current_price - ema_200) / ema_200\n    else:\n        trend = \"SHORT\"\n        strength = (ema_200 - current_price) / ema_200\n        \n    signals.append({\n        \"asset\": ticker,\n        \"price\": current_price,\n        \"ema_200\": ema_200,\n        \"direction\": trend,\n        \"trend_strength_pct\": round(strength * 100, 2)\n    })\n\nreturn [{\"json\": {\"signals\": signals}}]"
+      },
+      "id": "trend-engine",
+      "name": "Calc EMA Trend",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        700,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "upsert",
+        "schema": {
+          "__rl": true,
+          "value": "public",
+          "mode": "list",
+          "cachedResultName": "public"
+        },
+        "table": {
+          "__rl": true,
+          "value": "trend_directions",
+          "mode": "list",
+          "cachedResultName": "trend_directions"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [
+            "asset"
+          ],
+          "schema": [
+            {
+              "id": "asset",
+              "displayName": "asset",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "direction",
+              "displayName": "direction",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "price",
+              "displayName": "price",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+             {
+              "id": "ema_200",
+              "displayName": "ema_200",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "update-db",
+      "name": "Update Trend DB",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.2,
+      "position": [
+        950,
+        300
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_ID",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "channel": "cta-strategy",
+        "text": "🌊 *Trend Following Update*",
+        "attachments": [
+          {
+            "color": "#3366ff",
+            "fields": [
+              {
+                "title": "Longs (Bullish)",
+                "value": "{{ $json.signals.filter(s => s.direction == 'LONG').map(s => s.asset).join(', ') }}",
+                "short": false
+              },
+              {
+                "title": "Shorts (Bearish)",
+                "value": "{{ $json.signals.filter(s => s.direction == 'SHORT').map(s => s.asset).join(', ') }}",
+                "short": false
+              }
+            ]
+          }
+        ]
+      },
+      "id": "alert-cta",
+      "name": "Alert CTA Desk",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.1,
+      "position": [
+        1200,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Friday Close": {
+      "main": [
+        [
+          {
+            "node": "Fetch OHLCV",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch OHLCV": {
+      "main": [
+        [
+          {
+            "node": "Calc EMA Trend",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calc EMA Trend": {
+      "main": [
+        [
+          {
+            "node": "Update Trend DB",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Alert CTA Desk",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}
